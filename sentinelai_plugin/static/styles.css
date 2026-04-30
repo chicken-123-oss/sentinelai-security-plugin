@@ -224,6 +224,42 @@ h1 {
   margin: 22px auto 48px;
 }
 
+.managed-entry-page {
+  min-height: 100vh;
+}
+
+.managed-entry-shell {
+  width: min(1180px, calc(100% - 28px));
+  margin: 18px auto;
+}
+
+.managed-entry-panel {
+  min-height: calc(100vh - 36px);
+}
+
+.managed-entry-auth {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.managed-entry-body {
+  display: grid;
+  gap: 14px;
+  padding: 14px 16px 18px;
+}
+
+.managed-entry-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.managed-entry-lists > section {
+  border: 1px solid var(--line);
+  background: #111419;
+}
+
 .is-hidden {
   display: none;
 }
@@ -481,6 +517,71 @@ h1 {
   border-bottom: 1px solid var(--line);
 }
 
+.agent-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.32fr) minmax(420px, 1fr);
+  min-height: 580px;
+}
+
+.agent-sidebar {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-right: 1px solid var(--line);
+}
+
+.agent-row.is-active {
+  background: rgba(217, 54, 47, 0.12);
+}
+
+.agent-chat-panel {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  min-height: 580px;
+}
+
+.chat-log {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  max-height: 540px;
+  overflow: auto;
+  padding: 16px;
+}
+
+.chat-message {
+  display: grid;
+  gap: 8px;
+  max-width: 78%;
+  border: 1px solid var(--line);
+  background: #0a0c10;
+  padding: 12px;
+}
+
+.chat-message-user {
+  justify-self: end;
+  border-color: var(--red);
+}
+
+.chat-message-agent {
+  justify-self: start;
+  border-color: var(--green);
+}
+
+.chat-message p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.chat-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  padding: 14px 16px;
+  border-top: 1px solid var(--line);
+}
+
 .provider-form,
 .password-form {
   display: grid;
@@ -521,6 +622,10 @@ h1 {
   .two-col,
   .incident-grid,
   .provider-form,
+  .agent-layout,
+  .chat-form,
+  .managed-entry-auth,
+  .managed-entry-metrics,
   .table-row,
   .content-row {
     grid-template-columns: 1fr;
@@ -543,5 +648,13 @@ h1 {
     border-bottom: 1px solid var(--line);
     max-height: 420px;
   }
-}
 
+  .agent-sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .chat-message {
+    max-width: 100%;
+  }
+}

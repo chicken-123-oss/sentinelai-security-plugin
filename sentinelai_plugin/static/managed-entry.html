@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SentinelAI Managed Entry</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body class="managed-entry-page">
+    <main class="managed-entry-shell">
+      <section class="panel managed-entry-panel">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">:// MANAGED SITE ENTRY</p>
+            <h3 data-i18n="title">SentinelAI Status</h3>
+          </div>
+          <div class="language-toggle" role="group" aria-label="Language">
+            <button data-lang="en">EN</button>
+            <button data-lang="zh-CN">中文</button>
+          </div>
+        </div>
+        <form class="managed-entry-auth" id="entryAuthForm">
+          <input id="entryToken" data-i18n-placeholder="tokenPlaceholder" placeholder="Bearer token">
+          <button class="primary-action" type="submit" data-i18n="load">Load</button>
+          <button type="button" id="openConsoleBtn" data-i18n="openConsole">Open Console</button>
+        </form>
+        <div class="managed-entry-body">
+          <div class="live-pill" id="entryStatus">CONNECTING</div>
+          <div class="metrics managed-entry-metrics" id="entryMetrics"></div>
+          <div class="two-col managed-entry-lists">
+            <section>
+              <div class="panel-header">
+                <h3 data-i18n="incidents">Incidents</h3>
+              </div>
+              <div id="entryIncidents" class="stack-list"></div>
+            </section>
+            <section>
+              <div class="panel-header">
+                <h3 data-i18n="visitors">Visitors</h3>
+              </div>
+              <div id="entryVisitors" class="stack-list"></div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+    <script src="/static/managed-entry.js"></script>
+  </body>
+</html>

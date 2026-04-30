@@ -66,6 +66,32 @@ login, password change, and clean SQLite connection handling.
 Verification: compileall passed, node --check passed, unittest 4 tests passed.
 ```
 
+Additional update on 2026-04-28:
+
+```text
+Changed visitor recording to deduplicate repeated scan/polling results. Visitor rows
+now keep firstSeen, lastSeen, and visitCount. Added /api/v1/visitors/record for
+website middleware and reverse-proxy adapters. API errors now include detailed Chinese
+message, details, and hint fields. Expanded usage documentation with API integration,
+deployment, import, reverse proxy adaptation, admin-system adaptation, and model-provider
+adaptation guidance.
+Verification: compileall passed, node --check passed, unittest 4 tests passed.
+```
+
+Additional update on 2026-04-28:
+
+```text
+Added a managed-site backend entry surface: /managed-entry and
+/api/v1/managed-site/summary expose compact plugin status, recent incidents, recent
+visitors, connected agents, active model provider, and a localized redirect button for
+the full SentinelAI console. Added the AI Chat dashboard tab and /api/v1/ai/chat,
+with persisted conversation history in SQLite and replies from the active connected
+model provider, using managed-site state as context and falling back offline when needed.
+Expanded smoke tests and documentation for managed-site import, admin-portal adaptation,
+and direct AI conversation.
+Verification: compileall passed, node --check app.js passed, node --check managed-entry.js passed, unittest 4 tests passed.
+```
+
 Run a demo server:
 
 ```powershell

@@ -71,7 +71,8 @@ Environment variables:
 7. Open Visitors to inspect recent request paths, methods, IPs, user agents, and timestamps.
 8. Use Approve or Reject to record the human decision.
 9. Run approved or policy-ready actions from the incident detail panel.
-10. Check Models, Account, and Audit for model-provider selection, password changes, and operator history.
+10. Open AI Chat to talk directly with the connected large-model provider about status, incidents, visitors, or model access. The managed-site agent is used as context.
+11. Check Models, Account, and Audit for model-provider selection, password changes, and operator history.
 
 High-impact actions are dry-run by default. `capture_evidence` writes a redacted JSON artifact under `data/evidence`. `block_ip` records the IP under `data/blocked_ips.json` as a connector-safe simulation.
 
@@ -171,7 +172,307 @@ Invoke-RestMethod -Method Get -Uri http://127.0.0.1:8787/api/v1/monitor/live `
   -Headers @{ Authorization = "Bearer $token" }
 ```
 
-## 8. Host-Agent Simulator
+Load the managed-site backend entry summary:
+
+```powershell
+Invoke-RestMethod -Method Get -Uri http://127.0.0.1:8787/api/v1/managed-site/summary `
+  -Headers @{ Authorization = "Bearer dev-ingest-token" }
+```
+
+Ask the connected AI a question:
+
+```powershell
+$chat = @{
+  agentId = "agent_local"
+  message = "Please report current status and latest incident."
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8787/api/v1/ai/chat `
+  -Headers @{ Authorization = "Bearer $token" } `
+  -ContentType "application/json" `
+  -Body $chat
+```
+
+Record a visitor from your website middleware or reverse proxy adapter:
+
+```powershell
+$visitor = @{
+  ip = "203.0.113.77"
+  userAgent = "Mozilla/5.0"
+  path = "/pricing"
+  method = "GET"
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8787/api/v1/visitors/record `
+  -Headers @{ Authorization = "Bearer dev-ingest-token" } `
+  -ContentType "application/json" `
+  -Body $visitor
+```
+
+Duplicate visitor records are not inserted repeatedly. SentinelAI fingerprints `ip + userAgent + path + method`; repeated hits update `lastSeen` and `visitCount`.
+
+## 8. API Integration Guide
+
+### Authentication
+
+There are two token classes:
+
+- Owner/operator APIs use the token returned by `POST /api/v1/auth/login`.
+- Collector, middleware, and host-agent ingestion APIs use `SENTINELAI_INGEST_TOKEN`.
+
+Every authenticated request must include:
+
+```text
+Authorization: Bearer <token>
+Content-Type: application/json
+```
+
+### Event Ingestion Contract
+
+Send security observations to:
+
+```text
+POST /api/v1/events/ingest
+```
+
+Minimum useful payload:
+
+```json
+{
+  "source": "nginx",
+  "category": "request",
+  "trustLabel": "low",
+  "severityHint": "high",
+  "actor": { "type": "ip", "id": "203.0.113.10", "ip": "203.0.113.10" },
+  "asset": { "kind": "site", "id": "/login" },
+  "labels": ["admin_panel"],
+  "payload": { "method": "POST", "path": "/login", "body": "username=admin' OR '1'='1" }
+}
+```
+
+Recommended adapter mapping:
+
+| Source system | SentinelAI field | Notes |
+| --- | --- | --- |
+| Web server access log | `source=nginx|apache`, `category=request` | Put URL, method, status, and request excerpt in `payload`. |
+| Application auth log | `source=auth`, `category=login` | Put user id, source IP, failure count, MFA state in `actor` and `payload`. |
+| File watcher | `source=file`, `category=file_change|file_access` | Put changed path in `asset.id`; never send raw secrets. |
+| Process watcher | `source=process`, `category=proc_spawn` | Put process name in `asset.id`, PID/command in `payload`. |
+| Threat feed | `source=threat_feed`, `category=ioc_match` | Put matched IOC and feed name in `labels`/`payload`. |
+
+### Visitor Record Contract
+
+Send real visitor records to:
+
+```text
+POST /api/v1/visitors/record
+```
+
+Payload:
+
+```json
+{
+  "ip": "203.0.113.77",
+  "userAgent": "Mozilla/5.0",
+  "path": "/pricing",
+  "method": "GET"
+}
+```
+
+This interface is intentionally separate from security event ingestion. It is for visitor visibility, not threat scoring. Repeated identical visits update `visitCount` and `lastSeen`, so scanner refreshes and dashboard polling do not create duplicate rows.
+
+### Managed Website Backend Entry
+
+SentinelAI exposes an embeddable backend entry page for an existing managed website admin portal:
+
+```text
+GET /managed-entry
+```
+
+The page reads a bearer token from `?token=...`, from the browser's existing SentinelAI local storage, or from the token input shown in the entry panel. It displays compact status, incident, visitor, agent, and model information, then provides an "Open Console" redirect button to the full plugin dashboard.
+
+For safer production deployments, prefer a server-side admin-portal proxy instead of putting tokens into URLs:
+
+1. Your managed website backend stores `SENTINELAI_INGEST_TOKEN` or an auditor token in its server environment.
+2. The admin portal calls `GET /api/v1/managed-site/summary` from server-side code.
+3. The portal renders the summary in its own backend page.
+4. The redirect button points authorized operators to the SentinelAI console URL returned as `consoleUrl`.
+
+Summary endpoint:
+
+```text
+GET /api/v1/managed-site/summary
+Authorization: Bearer <admin | auditor | ingest token>
+```
+
+The response includes:
+
+```json
+{
+  "status": { "counts": { "incidents": 1, "visitors": 3, "agents": 1 } },
+  "activeProvider": { "name": "Offline Heuristic Analyzer", "model": "sentinelai-offline-v1" },
+  "incidents": [],
+  "visitors": [],
+  "agents": [],
+  "consoleUrl": "http://127.0.0.1:8787/",
+  "managedEntryUrl": "http://127.0.0.1:8787/managed-entry",
+  "redirectButton": { "label": "Open SentinelAI Console", "labelZh": "打开 SentinelAI 控制台", "url": "http://127.0.0.1:8787/" }
+}
+```
+
+### Connected AI Conversation Contract
+
+Register or check in the managed website agent first:
+
+```text
+POST /api/v1/agents/register
+POST /api/v1/agents/check-in
+Authorization: Bearer <ingest token>
+```
+
+Then use the dashboard AI Chat tab or call:
+
+```text
+POST /api/v1/ai/chat
+Authorization: Bearer <admin token>
+```
+
+Payload:
+
+```json
+{
+  "agentId": "agent_local",
+  "message": "请汇报当前状态和最新事件"
+}
+```
+
+The response stores both the operator message and the connected AI reply. SentinelAI sends recent monitored context to the currently active model provider. If the model provider is offline or not configured, the offline analyzer returns a safe fallback answer instead of failing the request:
+
+```json
+{
+  "ok": true,
+  "agentId": "agent_local",
+  "message": { "role": "user", "message": "..." },
+  "reply": { "role": "agent", "message": "..." },
+  "provider": "Offline Heuristic Analyzer",
+  "llmAvailable": false,
+  "fallbackUsed": true,
+  "items": []
+}
+```
+
+Conversation history is available through:
+
+```text
+GET /api/v1/ai/chat?agentId=agent_local
+Authorization: Bearer <admin | auditor token>
+```
+
+The older `/api/v1/agent/chat` path remains as a compatibility alias, but new integrations should use `/api/v1/ai/chat`.
+
+### Error Response Shape
+
+Errors include English and detailed Chinese fields:
+
+```json
+{
+  "ok": false,
+  "code": "AUTH_REQUIRED",
+  "error": "missing or invalid bearer token",
+  "messageZh": "认证失败：缺少或无效的 Bearer Token。",
+  "detailsZh": "该接口需要在请求头中提供 Authorization: Bearer <token>。",
+  "hintZh": "登录后使用返回的管理员 token；采集端接口请使用 SENTINELAI_INGEST_TOKEN。"
+}
+```
+
+Frontend integrations should display `messageZh + detailsZh + hintZh` when the UI language is Chinese.
+
+## 9. Deployment, Import, And Adaptation
+
+### Local Deployment
+
+1. Extract `sentinelai-security-plugin.zip`.
+2. Enter the project directory.
+3. Set strong secrets:
+
+```powershell
+$env:SENTINELAI_ADMIN_EMAIL="owner@example.com"
+$env:SENTINELAI_ADMIN_PASSWORD="change-me-now-123"
+$env:SENTINELAI_ADMIN_TOKEN="replace-owner-token"
+$env:SENTINELAI_INGEST_TOKEN="replace-ingest-token"
+$env:SENTINELAI_DATA_DIR="C:\sentinelai\data"
+$env:SENTINELAI_DB_PATH="C:\sentinelai\data\sentinelai.sqlite3"
+python -m sentinelai_plugin --host 127.0.0.1 --port 8787
+```
+
+4. Put a reverse proxy with TLS in front of the service for shared environments.
+5. Restrict access to the console path with your network firewall, VPN, or SSO gateway.
+
+### Import Into A Python Web App
+
+Use SentinelAI as a local library from the project root:
+
+```python
+from sentinelai_plugin.pipeline import process_event
+from sentinelai_plugin.storage import Storage
+
+storage = Storage("data/sentinelai.sqlite3")
+storage.init()
+storage.ensure_defaults("owner@example.com", "initial-password-123")
+
+incident = process_event(storage, {
+    "source": "app",
+    "category": "request",
+    "trustLabel": "low",
+    "severityHint": "high",
+    "actor": {"type": "ip", "id": client_ip, "ip": client_ip},
+    "asset": {"kind": "site", "id": request_path},
+    "payload": {"method": method, "path": request_path, "body": redacted_body}
+}, actor="app-middleware")
+```
+
+### Reverse Proxy Adaptation
+
+For Nginx, Apache, CDN workers, or WAF adapters:
+
+1. Parse the incoming request metadata.
+2. Redact cookies, authorization headers, passwords, and tokens before sending payloads.
+3. Send a visitor record to `/api/v1/visitors/record`.
+4. Send only suspicious observations to `/api/v1/events/ingest`, or send all events if you want centralized scoring.
+5. Keep the ingest token outside the public frontend; use server-side middleware only.
+
+### Existing Admin System Adaptation
+
+If you already have an admin portal:
+
+1. Keep SentinelAI behind the same trusted network boundary.
+2. Replace the default token handling with your SSO/session gateway at the reverse proxy layer.
+3. Continue using SentinelAI RBAC internally for owner-only model and policy changes.
+4. Add a backend menu entry such as "Security Monitor" or "SentinelAI" in the managed website admin portal.
+5. For the fastest integration, link that menu entry to `/managed-entry` or render it in a trusted iframe.
+6. For a stricter integration, call `/api/v1/managed-site/summary` from the admin backend, render the returned counts/lists in your own template, and use `redirectButton.url` for the full-console button.
+7. Keep `SENTINELAI_INGEST_TOKEN` and auditor tokens on the server side; do not put long-lived tokens into public JavaScript.
+8. Map your admin roles to SentinelAI tokens: owner token for configuration, auditor token for read-only display, ingest token only for server-side collection and summary widgets.
+9. Keep password-change enabled for standalone mode, or hide the Account tab if your SSO owns password lifecycle.
+
+### Model Provider Adaptation
+
+For hosted OpenAI-compatible APIs:
+
+1. Set the provider endpoint, model, and secret reference in the Models tab.
+2. Export the real key in the server environment using the same secret reference name.
+3. Activate the provider.
+4. Ingest a known test event.
+5. Check incident analysis for `llmAvailable=true`; if unavailable, inspect `fallbackReason`.
+
+For local Ollama:
+
+1. Start Ollama and pull a JSON-capable model.
+2. Add provider type `ollama`.
+3. Use endpoint `http://127.0.0.1:11434`.
+4. Activate the provider.
+
+## 10. Host-Agent Simulator
 
 With the server running, send a check-in and demo events:
 
@@ -181,20 +482,22 @@ python -m sentinelai_plugin.agent --api http://127.0.0.1:8787 --token dev-ingest
 
 The simulator demonstrates the intended host-agent contract without requiring SSH, root privileges, Docker, or external security tools.
 
-## 9. Test The Product
+## 11. Test The Product
 
 ```powershell
 python -m compileall sentinelai_plugin tests
 node --check sentinelai_plugin\static\app.js
+node --check sentinelai_plugin\static\managed-entry.js
 python -m unittest discover
 ```
 
-The tests cover deterministic scoring, redaction and incident storage, login, event ingestion, incident listing, and safe evidence capture.
+The tests cover deterministic scoring, redaction and incident storage, login, event ingestion, incident listing, safe evidence capture, visitor deduplication, managed-site summary, managed-entry serving, and agent chat history.
 
-## 10. Production Notes
+## 12. Production Notes
 
 - Replace all default tokens and passwords.
 - Put the API behind TLS and a real authentication boundary.
 - Connect `block_ip`, `disable_account`, `quarantine_file`, and similar actions to audited production connectors instead of granting arbitrary shell access.
 - Keep external LLM providers optional. Detection continues through local rules when the model is unavailable.
 - Use a proper secret manager for server bootstrap credentials. The current MVP stores only provider secret references, not raw keys.
+- Keep visitor recording on the server side only. Do not expose `SENTINELAI_INGEST_TOKEN` in browser JavaScript.

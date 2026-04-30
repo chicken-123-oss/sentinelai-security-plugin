@@ -13,6 +13,7 @@ const I18N = {
     navVisitors: "Visitors",
     navContent: "Content",
     navModels: "Models",
+    navAgent: "AI Chat",
     navAccount: "Account",
     navAudit: "Audit",
     overviewTitle: "Real-Time Monitored Data",
@@ -25,6 +26,16 @@ const I18N = {
     modelAccess: "Large Model API Access",
     modelHint: "Choose any provider independently; store secret references, not raw keys.",
     saveModel: "Save Model",
+    agentConversation: "Connected AI Conversation",
+    agentConversationHint: "Talk directly with the active model provider using current monitored context.",
+    connectedAgent: "Managed-Site Context",
+    agentChatPlaceholder: "Ask the connected AI about incidents, visitors, model access, or status",
+    sendMessage: "Send",
+    noAgents: "No managed-site context available.",
+    lastSeen: "Last seen",
+    policyVersion: "Policy",
+    user: "You",
+    agent: "AI",
     passwordChange: "Password Change",
     currentPassword: "Current Password",
     newPassword: "New Password",
@@ -56,6 +67,7 @@ const I18N = {
     navVisitors: "访客",
     navContent: "内容",
     navModels: "模型",
+    navAgent: "AI 对话",
     navAccount: "账户",
     navAudit: "审计",
     overviewTitle: "实时监控数据",
@@ -68,6 +80,16 @@ const I18N = {
     modelAccess: "大模型 API 接入",
     modelHint: "用户可自主选择大模型供应商；保存密钥引用而非明文密钥。",
     saveModel: "保存模型",
+    agentConversation: "连接 AI 对话",
+    agentConversationHint: "直接与当前启用的大模型对话，并自动携带监控上下文。",
+    connectedAgent: "托管站点上下文",
+    agentChatPlaceholder: "询问连接 AI 的事件、访客、模型接入或运行状态",
+    sendMessage: "发送",
+    noAgents: "暂无托管站点上下文。",
+    lastSeen: "最后心跳",
+    policyVersion: "策略",
+    user: "你",
+    agent: "AI",
     passwordChange: "修改密码",
     currentPassword: "当前密码",
     newPassword: "新密码",
@@ -95,8 +117,11 @@ const state = {
   events: [],
   visitors: [],
   providers: [],
+  agents: [],
+  agentMessages: [],
   audit: [],
   selectedIncidentId: "",
+  selectedAgentId: "",
   status: null,
   liveTimer: null
 };
@@ -127,6 +152,11 @@ const els = {
   providerEndpoint: document.getElementById("providerEndpoint"),
   providerModel: document.getElementById("providerModel"),
   providerSecretRef: document.getElementById("providerSecretRef"),
+  agentSelect: document.getElementById("agentSelect"),
+  agentStatusList: document.getElementById("agentStatusList"),
+  agentChatLog: document.getElementById("agentChatLog"),
+  agentChatForm: document.getElementById("agentChatForm"),
+  agentChatInput: document.getElementById("agentChatInput"),
   passwordForm: document.getElementById("passwordForm"),
   currentPassword: document.getElementById("currentPassword"),
   newPassword: document.getElementById("newPassword"),
@@ -220,6 +250,17 @@ els.passwordForm.addEventListener("submit", async (event) => {
   }
 });
 
+els.agentSelect.addEventListener("change", async () => {
+  state.selectedAgentId = els.agentSelect.value;
+  await loadAgentMessages();
+  renderAgentChat();
+});
+
+els.agentChatForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await sendAgentMessage();
+});
+
 init();
 
 async function init() {
@@ -241,6 +282,9 @@ function setLanguage(lang) {
   document.documentElement.lang = state.lang;
   document.querySelectorAll("[data-i18n]").forEach((node) => {
     node.textContent = t(node.dataset.i18n);
+  });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((node) => {
+    node.setAttribute("placeholder", t(node.dataset.i18nPlaceholder));
   });
   document.querySelectorAll("[data-lang]").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.lang === state.lang);
@@ -289,6 +333,7 @@ async function loadCaptcha() {
 
 async function loadAll() {
   await Promise.all([loadStatus(), loadIncidents(), loadProviders(), loadAgents(), loadAudit(), loadVisitors(), loadEvents()]);
+  await loadAgentMessages();
   renderAll();
 }
 
@@ -299,6 +344,10 @@ async function loadLive() {
   state.incidents = response.incidents || [];
   state.events = response.events || [];
   state.visitors = response.visitors || [];
+  state.agents = response.agents || state.agents || [];
+  if ((!state.selectedAgentId || !state.agents.some((agent) => agent.id === state.selectedAgentId)) && state.agents.length > 0) {
+    state.selectedAgentId = state.agents[0].id;
+  }
   state.audit = response.audit || [];
   if (!state.providers.length && response.activeProvider) {
     state.providers = [response.activeProvider];
@@ -330,6 +379,18 @@ async function loadProviders() {
 async function loadAgents() {
   const response = await api("/api/v1/agents");
   state.agents = response.items || [];
+  if ((!state.selectedAgentId || !state.agents.some((agent) => agent.id === state.selectedAgentId)) && state.agents.length > 0) {
+    state.selectedAgentId = state.agents[0].id;
+  }
+}
+
+async function loadAgentMessages() {
+  if (!state.selectedAgentId) {
+    state.agentMessages = [];
+    return;
+  }
+  const response = await api(`/api/v1/ai/chat?agentId=${encodeURIComponent(state.selectedAgentId)}`);
+  state.agentMessages = response.items || [];
 }
 
 async function loadAudit() {
@@ -365,6 +426,7 @@ function renderAll() {
   renderVisitors();
   renderEvents();
   renderProviders();
+  renderAgentChat();
   renderAudit();
 }
 
@@ -471,7 +533,7 @@ function renderVisitorRows(items, compact) {
     <div class="${compact ? "stack-row" : "table-row"}">
       <strong>${escapeHtml(visitor.ip)}</strong>
       <span>${escapeHtml(visitor.method)} ${escapeHtml(visitor.path)}</span>
-      <span class="muted">${escapeHtml(visitor.createdAt)}</span>
+      <span class="muted">${escapeHtml(visitor.lastSeen || visitor.createdAt)} / x${escapeHtml(visitor.visitCount || 1)}</span>
       ${compact ? "" : `<span class="muted">${escapeHtml(visitor.userAgent)}</span>`}
     </div>
   `).join("");
@@ -523,6 +585,48 @@ function renderProviders() {
   });
 }
 
+function renderAgentChat() {
+  if (!els.agentSelect) return;
+  if (!state.agents.length) {
+    els.agentSelect.innerHTML = "";
+    els.agentStatusList.innerHTML = `<p class="muted">${t("noAgents")}</p>`;
+    els.agentChatLog.innerHTML = `<p class="muted">${t("noAgents")}</p>`;
+    return;
+  }
+
+  els.agentSelect.innerHTML = state.agents.map((agent) => `
+    <option value="${escapeHtml(agent.id)}">${escapeHtml(agent.name)} / ${escapeHtml(agent.status)}</option>
+  `).join("");
+  els.agentSelect.value = state.selectedAgentId || state.agents[0].id;
+
+  els.agentStatusList.innerHTML = state.agents.map((agent) => `
+    <div class="agent-row ${agent.id === state.selectedAgentId ? "is-active" : ""}">
+      <div>
+        <div class="badge-line">
+          <strong>${escapeHtml(agent.name)}</strong>
+          <span class="badge severity-${agent.status}">${escapeHtml(agent.status)}</span>
+        </div>
+        <p class="muted">${t("policyVersion")} ${escapeHtml(agent.policyVersion)} / ${t("lastSeen")} ${escapeHtml(agent.lastSeen)}</p>
+      </div>
+    </div>
+  `).join("");
+
+  if (!state.agentMessages.length) {
+    els.agentChatLog.innerHTML = `<p class="muted">${t("noData")}</p>`;
+    return;
+  }
+  els.agentChatLog.innerHTML = state.agentMessages.map((message) => `
+    <article class="chat-message chat-message-${escapeHtml(message.role)}">
+      <div class="badge-line">
+        <strong>${message.role === "user" ? t("user") : t("agent")}</strong>
+        <span class="muted">${escapeHtml(message.createdAt)}</span>
+      </div>
+      <p>${escapeHtml(message.message)}</p>
+    </article>
+  `).join("");
+  els.agentChatLog.scrollTop = els.agentChatLog.scrollHeight;
+}
+
 function renderAudit() {
   if (!state.audit.length) {
     els.auditList.innerHTML = `<p class="muted">${t("noData")}</p>`;
@@ -535,6 +639,31 @@ function renderAudit() {
       <span class="muted">${escapeHtml(entry.createdAt)}</span>
     </div>
   `).join("");
+}
+
+async function sendAgentMessage() {
+  const message = els.agentChatInput.value.trim();
+  if (!message) {
+    notify(t("agentChatPlaceholder"));
+    return;
+  }
+  if (!state.selectedAgentId && state.agents.length > 0) {
+    state.selectedAgentId = state.agents[0].id;
+  }
+  try {
+    const response = await api("/api/v1/ai/chat", {
+      method: "POST",
+      body: {
+        agentId: state.selectedAgentId,
+        message
+      }
+    });
+    state.agentMessages = response.items || [];
+    els.agentChatInput.value = "";
+    renderAgentChat();
+  } catch (error) {
+    notify(error.message);
+  }
 }
 
 async function handleIncidentCommand(action, incidentId) {
@@ -584,7 +713,8 @@ async function api(path, options = {}) {
   });
   const data = response.status === 204 ? {} : await response.json();
   if (!response.ok) {
-    throw new Error(data.error || `HTTP ${response.status}`);
+    const zhMessage = [data.messageZh, data.detailsZh, data.hintZh].filter(Boolean).join(" ");
+    throw new Error((state.lang === "zh-CN" && zhMessage) ? zhMessage : (data.error || `HTTP ${response.status}`));
   }
   return data;
 }
@@ -603,4 +733,3 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
 }
-

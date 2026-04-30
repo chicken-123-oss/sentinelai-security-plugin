@@ -3,6 +3,7 @@ import re
 import shutil
 import threading
 import unittest
+import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
@@ -62,6 +63,10 @@ class ApiSmokeTests(unittest.TestCase):
                 listed = request(base_url, "/api/v1/incidents", token="admin-token", method="GET")
                 self.assertEqual(len(listed["items"]), 1)
 
+                auth_error = request_error(base_url, "/api/v1/incidents", method="GET")
+                self.assertEqual(auth_error["code"], "AUTH_REQUIRED")
+                self.assertIn("messageZh", auth_error)
+
                 capture = next(run for run in incident["actionRuns"] if run["actionId"] == "capture_evidence")
                 executed = request(
                     base_url,
@@ -92,6 +97,36 @@ class ApiSmokeTests(unittest.TestCase):
                 live = request(base_url, "/api/v1/monitor/live", token="admin-token", method="GET")
                 self.assertGreaterEqual(len(live["events"]), 1)
                 self.assertIn("visitors", live)
+                self.assertIn("agents", live)
+
+                managed_summary = request(base_url, "/api/v1/managed-site/summary", token="ingest-token", method="GET")
+                self.assertIn("consoleUrl", managed_summary)
+                self.assertIn("managedEntryUrl", managed_summary)
+                self.assertGreaterEqual(len(managed_summary["agents"]), 1)
+
+                managed_entry_html = request_text(base_url, "/managed-entry", method="GET")
+                self.assertIn("managed-entry.js", managed_entry_html)
+
+                chat = request(
+                    base_url,
+                    "/api/v1/ai/chat",
+                    token="admin-token",
+                    body={"agentId": "agent_local", "message": "status please"},
+                )
+                self.assertTrue(chat["ok"])
+                self.assertEqual(chat["reply"]["role"], "agent")
+                self.assertEqual(chat["reply"]["metadata"]["source"], "connected-ai-model")
+                self.assertIn("provider", chat)
+                history = request(base_url, "/api/v1/ai/chat?agentId=agent_local", token="admin-token", method="GET")
+                self.assertGreaterEqual(len(history["items"]), 2)
+
+                visitor_body = {"ip": "203.0.113.77", "userAgent": "UnitTestScanner/1.0", "path": "/pricing", "method": "GET"}
+                request(base_url, "/api/v1/visitors/record", token="ingest-token", body=visitor_body)
+                request(base_url, "/api/v1/visitors/record", token="ingest-token", body=visitor_body)
+                visitors = request(base_url, "/api/v1/visitors", token="admin-token", method="GET")["items"]
+                pricing_records = [item for item in visitors if item["ip"] == "203.0.113.77" and item["path"] == "/pricing"]
+                self.assertEqual(len(pricing_records), 1)
+                self.assertEqual(pricing_records[0]["visitCount"], 2)
 
                 changed = request(
                     base_url,
@@ -118,6 +153,29 @@ def request(base_url, path, *, method="POST", token=None, body=None):
     req = urllib.request.Request(base_url + path, data=data, headers=headers, method=method)
     with urllib.request.urlopen(req, timeout=10) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+def request_error(base_url, path, *, method="POST", token=None, body=None):
+    try:
+        request(base_url, path, method=method, token=token, body=body)
+    except urllib.error.HTTPError as exc:
+        try:
+            return json.loads(exc.read().decode("utf-8"))
+        finally:
+            exc.close()
+    raise AssertionError("request unexpectedly succeeded")
+
+
+def request_text(base_url, path, *, method="GET", token=None, body=None):
+    headers = {"Content-Type": "application/json"}
+    data = None
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(base_url + path, data=data, headers=headers, method=method)
+    with urllib.request.urlopen(req, timeout=10) as response:
+        return response.read().decode("utf-8")
 
 
 def captcha_answer(question):

@@ -62,6 +62,7 @@
         <button class="tab" data-tab="visitors" data-i18n="navVisitors">Visitors</button>
         <button class="tab" data-tab="content" data-i18n="navContent">Content</button>
         <button class="tab" data-tab="providers" data-i18n="navModels">Models</button>
+        <button class="tab" data-tab="agent" data-i18n="navAgent">Agent</button>
         <button class="tab" data-tab="account" data-i18n="navAccount">Account</button>
         <button class="tab" data-tab="audit" data-i18n="navAudit">Audit</button>
         <button class="tab danger" id="logoutBtn" data-i18n="signOut">Sign Out</button>
@@ -153,6 +154,31 @@
         </section>
       </section>
 
+      <section class="view" id="agentView">
+        <section class="panel full">
+          <div class="panel-header">
+            <h3 data-i18n="agentConversation">Connected Agent Conversation</h3>
+            <span class="microcopy" data-i18n="agentConversationHint">Talk directly with the active managed-site agent.</span>
+          </div>
+          <div class="agent-layout">
+            <aside class="agent-sidebar">
+              <label>
+                <span data-i18n="connectedAgent">Connected Agent</span>
+                <select id="agentSelect"></select>
+              </label>
+              <div id="agentStatusList" class="stack-list"></div>
+            </aside>
+            <section class="agent-chat-panel">
+              <div id="agentChatLog" class="chat-log"></div>
+              <form id="agentChatForm" class="chat-form">
+                <input id="agentChatInput" data-i18n-placeholder="agentChatPlaceholder" placeholder="Ask the connected agent about incidents, visitors, or status">
+                <button class="primary-action" type="submit" data-i18n="sendMessage">Send</button>
+              </form>
+            </section>
+          </div>
+        </section>
+      </section>
+
       <section class="view" id="accountView">
         <section class="panel account-panel">
           <div class="panel-header">
@@ -186,4 +212,3 @@
     <script src="/static/app.js"></script>
   </body>
 </html>
-

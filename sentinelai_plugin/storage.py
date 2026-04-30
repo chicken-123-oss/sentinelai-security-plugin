@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import hashlib
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -55,6 +56,15 @@ class Storage:
                     created_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS agent_messages (
+                    id TEXT PRIMARY KEY,
+                    agent_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS providers (
                     id TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -100,6 +110,10 @@ class Storage:
                     user_agent TEXT NOT NULL,
                     path TEXT NOT NULL,
                     method TEXT NOT NULL,
+                    fingerprint TEXT,
+                    first_seen TEXT,
+                    last_seen TEXT,
+                    visit_count INTEGER DEFAULT 1,
                     created_at TEXT NOT NULL
                 );
 
@@ -160,6 +174,18 @@ class Storage:
                 );
                 """
             )
+            _ensure_column(conn, "visitor_records", "fingerprint", "TEXT")
+            _ensure_column(conn, "visitor_records", "first_seen", "TEXT")
+            _ensure_column(conn, "visitor_records", "last_seen", "TEXT")
+            _ensure_column(conn, "visitor_records", "visit_count", "INTEGER DEFAULT 1")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_visitor_records_fingerprint ON visitor_records (fingerprint)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_messages_agent_time ON agent_messages (agent_id, created_at)")
+            conn.execute("UPDATE visitor_records SET first_seen = COALESCE(first_seen, created_at), last_seen = COALESCE(last_seen, created_at), visit_count = COALESCE(visit_count, 1)")
+            for row in conn.execute("SELECT id, ip, user_agent, path, method FROM visitor_records WHERE fingerprint IS NULL OR fingerprint = ''").fetchall():
+                conn.execute(
+                    "UPDATE visitor_records SET fingerprint = ? WHERE id = ?",
+                    (_visitor_fingerprint(row["ip"], row["user_agent"], row["path"], row["method"]), row["id"]),
+                )
             conn.commit()
 
     def ensure_defaults(self, admin_email: str = "admin@example.com", admin_password: str = "sentinelai") -> None:
@@ -219,12 +245,16 @@ class Storage:
                 "sites": _count(conn, "sites"),
                 "agents": _count(conn, "agents"),
                 "providers": _count(conn, "providers"),
-                "visitors": _count(conn, "visitor_records"),
+                "visitors": _unique_visitor_count(conn),
                 "events": _count(conn, "events"),
                 "incidents": _count(conn, "incidents"),
                 "actionRuns": _count(conn, "action_runs"),
+                "agentMessages": _count(conn, "agent_messages"),
                 "auditLogs": _count(conn, "audit_logs"),
             }
+
+    def current_time(self) -> str:
+        return utc_now()
 
     def count_incidents(self) -> int:
         with self._lock, self.connect() as conn:
@@ -287,6 +317,45 @@ class Storage:
         with self._lock, self.connect() as conn:
             rows = conn.execute("SELECT * FROM agents ORDER BY last_seen DESC").fetchall()
         return [_agent_from_row(row) for row in rows]
+
+    def add_agent_message(self, agent_id: str, role: str, message: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+        now = utc_now()
+        message_id = make_id("msg")
+        normalized_role = role if role in {"user", "agent", "system"} else "system"
+        with self._lock, self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO agent_messages (id, agent_id, role, message, metadata_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (message_id, agent_id[:120], normalized_role, message[:4000], _dump(metadata or {}), now),
+            )
+            conn.commit()
+        return {
+            "id": message_id,
+            "agentId": agent_id[:120],
+            "role": normalized_role,
+            "message": message[:4000],
+            "metadata": metadata or {},
+            "createdAt": now,
+        }
+
+    def list_agent_messages(self, agent_id: str, limit: int = 80) -> list[dict[str, Any]]:
+        capped_limit = max(1, min(limit, 200))
+        with self._lock, self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM (
+                    SELECT * FROM agent_messages
+                    WHERE agent_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                )
+                ORDER BY created_at ASC
+                """,
+                (agent_id[:120], capped_limit),
+            ).fetchall()
+        return [_agent_message_from_row(row) for row in rows]
 
     def create_provider(self, provider: dict[str, Any]) -> dict[str, Any]:
         now = utc_now()
@@ -614,17 +683,61 @@ class Storage:
         return ok
 
     def record_visitor(self, ip: str, user_agent: str, path: str, method: str) -> None:
+        normalized_ip = ip[:80]
+        normalized_agent = user_agent[:240]
+        normalized_path = path[:240]
+        normalized_method = method[:16]
+        fingerprint = _visitor_fingerprint(normalized_ip, normalized_agent, normalized_path, normalized_method)
+        now = utc_now()
         with self._lock, self.connect() as conn:
-            conn.execute(
-                "INSERT INTO visitor_records (id, ip, user_agent, path, method, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (make_id("vis"), ip[:80], user_agent[:240], path[:240], method[:16], utc_now()),
-            )
+            row = conn.execute(
+                "SELECT id FROM visitor_records WHERE fingerprint = ? ORDER BY created_at DESC LIMIT 1",
+                (fingerprint,),
+            ).fetchone()
+            if row is not None:
+                conn.execute(
+                    "UPDATE visitor_records SET last_seen = ?, visit_count = COALESCE(visit_count, 1) + 1 WHERE id = ?",
+                    (now, row["id"]),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO visitor_records
+                    (id, ip, user_agent, path, method, fingerprint, first_seen, last_seen, visit_count, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        make_id("vis"),
+                        normalized_ip,
+                        normalized_agent,
+                        normalized_path,
+                        normalized_method,
+                        fingerprint,
+                        now,
+                        now,
+                        1,
+                        now,
+                    ),
+                )
             conn.commit()
 
     def list_visitors(self, limit: int = 100) -> list[dict[str, Any]]:
         with self._lock, self.connect() as conn:
-            rows = conn.execute("SELECT * FROM visitor_records ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
-        return [_visitor_from_row(row) for row in rows]
+            rows = conn.execute(
+                "SELECT * FROM visitor_records ORDER BY COALESCE(last_seen, created_at) DESC LIMIT ?",
+                (max(limit * 5, limit),),
+            ).fetchall()
+        visitors: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for row in rows:
+            key = row["fingerprint"] or _visitor_fingerprint(row["ip"], row["user_agent"], row["path"], row["method"])
+            if key in seen:
+                continue
+            seen.add(key)
+            visitors.append(_visitor_from_row(row))
+            if len(visitors) >= limit:
+                break
+        return visitors
 
     def _get_setting(self, conn: sqlite3.Connection, key: str, default: str) -> str:
         row = conn.execute("SELECT value FROM system_settings WHERE key = ?", (key,)).fetchone()
@@ -640,6 +753,16 @@ def _incident_title(event: dict[str, Any], score: dict[str, Any]) -> str:
 
 def _count(conn: sqlite3.Connection, table: str) -> int:
     return int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+
+
+def _unique_visitor_count(conn: sqlite3.Connection) -> int:
+    return int(conn.execute("SELECT COUNT(DISTINCT COALESCE(fingerprint, id)) FROM visitor_records").fetchone()[0])
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def _dump(value: Any) -> str:
@@ -749,6 +872,17 @@ def _agent_from_row(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
+def _agent_message_from_row(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "agentId": row["agent_id"],
+        "role": row["role"],
+        "message": row["message"],
+        "metadata": _load(row["metadata_json"]) or {},
+        "createdAt": row["created_at"],
+    }
+
+
 def _audit_from_row(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "id": row["id"],
@@ -767,9 +901,25 @@ def _visitor_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "userAgent": row["user_agent"],
         "path": row["path"],
         "method": row["method"],
+        "firstSeen": row["first_seen"] or row["created_at"],
+        "lastSeen": row["last_seen"] or row["created_at"],
+        "visitCount": int(row["visit_count"] or 1),
         "createdAt": row["created_at"],
     }
 
 
 def _parse_time(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _visitor_fingerprint(ip: str, user_agent: str, path: str, method: str) -> str:
+    material = json.dumps(
+        {
+            "ip": ip.strip().lower(),
+            "userAgent": user_agent.strip().lower(),
+            "path": path.strip().lower(),
+            "method": method.strip().upper(),
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
