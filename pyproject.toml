@@ -1,0 +1,10 @@
+[project]
+name = "sentinelai-security-plugin"
+version = "0.1.0"
+description = "Offline-runnable AI-assisted web security monitoring plugin MVP."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+sentinelai-security-plugin = "sentinelai_plugin.server:main"
+

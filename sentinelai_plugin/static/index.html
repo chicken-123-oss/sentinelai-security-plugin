@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SentinelAI Security Plugin</title>
+    <link rel="stylesheet" href="/static/styles.css">
+  </head>
+  <body>
+    <div class="frame-lines" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <div class="brand-lockup">
+        <span class="brand-mark">S</span>
+        <div>
+          <p class="eyebrow">// SENTINELAI SECURITY</p>
+          <h1 data-i18n="brandTitle">Threat Monitoring Console</h1>
+        </div>
+      </div>
+      <div class="header-actions">
+        <div class="live-pill" id="statusStrip">CONNECTING</div>
+        <div class="language-toggle" role="group" aria-label="Language">
+          <button id="langEn" data-lang="en">EN</button>
+          <button id="langZh" data-lang="zh-CN">中文</button>
+        </div>
+      </div>
+    </header>
+
+    <section class="login-stage" id="loginPanel">
+      <div class="login-copy">
+        <p class="eyebrow">:// AUTH GATE</p>
+        <h2 data-i18n="loginTitle">Advanced CAPTCHA Login</h2>
+        <p data-i18n="loginSubtitle">Password authentication is paired with a time-limited math challenge and nonce proof.</p>
+      </div>
+      <form id="loginForm" class="access-card">
+        <label>
+          <span data-i18n="email">Email</span>
+          <input id="email" type="email" value="admin@example.com" autocomplete="username">
+        </label>
+        <label>
+          <span data-i18n="password">Password</span>
+          <input id="password" type="password" value="sentinelai" autocomplete="current-password">
+        </label>
+        <div class="captcha-box">
+          <div>
+            <span class="field-label" data-i18n="captcha">CAPTCHA</span>
+            <strong id="captchaQuestion">Loading</strong>
+            <p id="captchaProof" class="microcopy"></p>
+          </div>
+          <button type="button" id="refreshCaptchaBtn" title="Refresh CAPTCHA">↻</button>
+        </div>
+        <div id="captchaChoices" class="choice-grid"></div>
+        <input id="captchaAnswer" type="hidden">
+        <button class="primary-action" type="submit" data-i18n="signIn">Sign In</button>
+      </form>
+    </section>
+
+    <main class="console-shell is-hidden" id="appShell">
+      <nav class="command-nav" aria-label="Dashboard sections">
+        <button class="tab is-active" data-tab="overview" data-i18n="navOverview">Monitor</button>
+        <button class="tab" data-tab="incidents" data-i18n="navIncidents">Incidents</button>
+        <button class="tab" data-tab="visitors" data-i18n="navVisitors">Visitors</button>
+        <button class="tab" data-tab="content" data-i18n="navContent">Content</button>
+        <button class="tab" data-tab="providers" data-i18n="navModels">Models</button>
+        <button class="tab" data-tab="account" data-i18n="navAccount">Account</button>
+        <button class="tab" data-tab="audit" data-i18n="navAudit">Audit</button>
+        <button class="tab danger" id="logoutBtn" data-i18n="signOut">Sign Out</button>
+      </nav>
+
+      <section class="view is-active" id="overviewView">
+        <div class="hero-panel">
+          <div>
+            <p class="eyebrow">:// LIVE DATA LINK</p>
+            <h2 data-i18n="overviewTitle">Real-Time Monitored Data</h2>
+            <p data-i18n="overviewCopy">Incidents, event content, model status, and visitor records update automatically.</p>
+          </div>
+          <div class="scanlines">
+            <span></span><span></span><span></span><span></span>
+          </div>
+        </div>
+        <div class="metrics" id="metrics"></div>
+        <div class="two-col">
+          <section class="panel">
+            <div class="panel-header">
+              <h3 data-i18n="liveIncidents">Live Incident List</h3>
+              <button id="refreshBtn" data-i18n="refresh">Refresh</button>
+            </div>
+            <div id="liveIncidentList" class="stack-list"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-header">
+              <h3 data-i18n="visitorRecords">Visitor Records</h3>
+            </div>
+            <div id="liveVisitorList" class="stack-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="incidentsView">
+        <section class="panel full">
+          <div class="panel-header">
+            <h3 data-i18n="incidentCenter">Incident Center</h3>
+          </div>
+          <div class="incident-grid">
+            <div class="incident-list" id="incidentList"></div>
+            <div class="incident-detail" id="incidentDetail"></div>
+          </div>
+        </section>
+      </section>
+
+      <section class="view" id="visitorsView">
+        <section class="panel full">
+          <div class="panel-header">
+            <h3 data-i18n="visitorRecords">Visitor Records</h3>
+          </div>
+          <div id="visitorList" class="table-list"></div>
+        </section>
+      </section>
+
+      <section class="view" id="contentView">
+        <section class="panel full">
+          <div class="panel-header">
+            <h3 data-i18n="monitoredContent">Monitored Content</h3>
+          </div>
+          <div id="eventContentList" class="content-feed"></div>
+        </section>
+      </section>
+
+      <section class="view" id="providersView">
+        <section class="panel full">
+          <div class="panel-header">
+            <h3 data-i18n="modelAccess">Large Model API Access</h3>
+            <span class="microcopy" data-i18n="modelHint">Choose any provider independently; store secret references, not raw keys.</span>
+          </div>
+          <form class="provider-form" id="providerForm">
+            <input id="providerName" placeholder="Provider name" value="Offline Heuristic Analyzer">
+            <select id="providerType">
+              <option value="offline_heuristic">offline_heuristic</option>
+              <option value="openai">openai</option>
+              <option value="azure_openai">azure_openai</option>
+              <option value="anthropic">anthropic</option>
+              <option value="gemini">gemini</option>
+              <option value="openai_compatible">openai_compatible</option>
+              <option value="ollama">ollama</option>
+              <option value="vllm">vllm</option>
+            </select>
+            <input id="providerEndpoint" placeholder="Endpoint URL">
+            <input id="providerModel" placeholder="Model" value="sentinelai-offline-v1">
+            <input id="providerSecretRef" placeholder="Secret reference">
+            <button class="primary-action" type="submit" data-i18n="saveModel">Save Model</button>
+          </form>
+          <div id="providerList" class="table-list"></div>
+        </section>
+      </section>
+
+      <section class="view" id="accountView">
+        <section class="panel account-panel">
+          <div class="panel-header">
+            <h3 data-i18n="passwordChange">Password Change</h3>
+          </div>
+          <form id="passwordForm" class="password-form">
+            <label>
+              <span data-i18n="currentPassword">Current Password</span>
+              <input id="currentPassword" type="password" autocomplete="current-password">
+            </label>
+            <label>
+              <span data-i18n="newPassword">New Password</span>
+              <input id="newPassword" type="password" autocomplete="new-password">
+            </label>
+            <button class="primary-action" type="submit" data-i18n="changePassword">Change Password</button>
+          </form>
+        </section>
+      </section>
+
+      <section class="view" id="auditView">
+        <section class="panel full">
+          <div class="panel-header">
+            <h3 data-i18n="auditLogs">Audit Logs</h3>
+          </div>
+          <div id="auditList" class="table-list"></div>
+        </section>
+      </section>
+    </main>
+
+    <div class="toast" id="toast"></div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
+

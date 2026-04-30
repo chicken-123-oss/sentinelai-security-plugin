@@ -1,0 +1,606 @@
+const I18N = {
+  en: {
+    brandTitle: "Threat Monitoring Console",
+    loginTitle: "Advanced CAPTCHA Login",
+    loginSubtitle: "Password authentication is paired with a time-limited math challenge and nonce proof.",
+    email: "Email",
+    password: "Password",
+    captcha: "CAPTCHA",
+    signIn: "Sign In",
+    signOut: "Sign Out",
+    navOverview: "Monitor",
+    navIncidents: "Incidents",
+    navVisitors: "Visitors",
+    navContent: "Content",
+    navModels: "Models",
+    navAccount: "Account",
+    navAudit: "Audit",
+    overviewTitle: "Real-Time Monitored Data",
+    overviewCopy: "Incidents, event content, model status, and visitor records update automatically.",
+    liveIncidents: "Live Incident List",
+    visitorRecords: "Visitor Records",
+    refresh: "Refresh",
+    incidentCenter: "Incident Center",
+    monitoredContent: "Monitored Content",
+    modelAccess: "Large Model API Access",
+    modelHint: "Choose any provider independently; store secret references, not raw keys.",
+    saveModel: "Save Model",
+    passwordChange: "Password Change",
+    currentPassword: "Current Password",
+    newPassword: "New Password",
+    changePassword: "Change Password",
+    auditLogs: "Audit Logs",
+    saved: "Saved",
+    activated: "Model activated",
+    passwordChanged: "Password changed",
+    chooseCaptcha: "Choose the CAPTCHA answer",
+    noData: "No data.",
+    approve: "Approve",
+    reject: "Reject",
+    run: "Run",
+    trust: "Trust",
+    active: "ACTIVE",
+    activate: "Activate"
+  },
+  "zh-CN": {
+    brandTitle: "威胁监控控制台",
+    loginTitle: "高级验证码登录",
+    loginSubtitle: "密码认证叠加限时数学挑战与 nonce 证明，降低自动化撞库风险。",
+    email: "邮箱",
+    password: "密码",
+    captcha: "验证码",
+    signIn: "登录",
+    signOut: "退出",
+    navOverview: "监控",
+    navIncidents: "事件",
+    navVisitors: "访客",
+    navContent: "内容",
+    navModels: "模型",
+    navAccount: "账户",
+    navAudit: "审计",
+    overviewTitle: "实时监控数据",
+    overviewCopy: "事件、拦截内容、模型状态与访客记录会自动刷新。",
+    liveIncidents: "实时事件列表",
+    visitorRecords: "访客记录",
+    refresh: "刷新",
+    incidentCenter: "事件中心",
+    monitoredContent: "监控内容",
+    modelAccess: "大模型 API 接入",
+    modelHint: "用户可自主选择大模型供应商；保存密钥引用而非明文密钥。",
+    saveModel: "保存模型",
+    passwordChange: "修改密码",
+    currentPassword: "当前密码",
+    newPassword: "新密码",
+    changePassword: "确认修改",
+    auditLogs: "审计日志",
+    saved: "已保存",
+    activated: "模型已启用",
+    passwordChanged: "密码已修改",
+    chooseCaptcha: "请选择验证码答案",
+    noData: "暂无数据。",
+    approve: "批准",
+    reject: "拒绝",
+    run: "执行",
+    trust: "信任分",
+    active: "启用中",
+    activate: "启用"
+  }
+};
+
+const state = {
+  token: localStorage.getItem("sentinelai_token") || "",
+  lang: localStorage.getItem("sentinelai_lang") || "en",
+  captcha: null,
+  incidents: [],
+  events: [],
+  visitors: [],
+  providers: [],
+  audit: [],
+  selectedIncidentId: "",
+  status: null,
+  liveTimer: null
+};
+
+const els = {
+  loginPanel: document.getElementById("loginPanel"),
+  appShell: document.getElementById("appShell"),
+  loginForm: document.getElementById("loginForm"),
+  email: document.getElementById("email"),
+  password: document.getElementById("password"),
+  captchaQuestion: document.getElementById("captchaQuestion"),
+  captchaProof: document.getElementById("captchaProof"),
+  captchaChoices: document.getElementById("captchaChoices"),
+  captchaAnswer: document.getElementById("captchaAnswer"),
+  refreshCaptchaBtn: document.getElementById("refreshCaptchaBtn"),
+  statusStrip: document.getElementById("statusStrip"),
+  metrics: document.getElementById("metrics"),
+  liveIncidentList: document.getElementById("liveIncidentList"),
+  liveVisitorList: document.getElementById("liveVisitorList"),
+  incidentList: document.getElementById("incidentList"),
+  incidentDetail: document.getElementById("incidentDetail"),
+  visitorList: document.getElementById("visitorList"),
+  eventContentList: document.getElementById("eventContentList"),
+  providerList: document.getElementById("providerList"),
+  providerForm: document.getElementById("providerForm"),
+  providerName: document.getElementById("providerName"),
+  providerType: document.getElementById("providerType"),
+  providerEndpoint: document.getElementById("providerEndpoint"),
+  providerModel: document.getElementById("providerModel"),
+  providerSecretRef: document.getElementById("providerSecretRef"),
+  passwordForm: document.getElementById("passwordForm"),
+  currentPassword: document.getElementById("currentPassword"),
+  newPassword: document.getElementById("newPassword"),
+  auditList: document.getElementById("auditList"),
+  toast: document.getElementById("toast")
+};
+
+document.querySelectorAll(".tab[data-tab]").forEach((button) => {
+  button.addEventListener("click", () => activateTab(button.dataset.tab));
+});
+document.querySelectorAll("[data-lang]").forEach((button) => {
+  button.addEventListener("click", () => setLanguage(button.dataset.lang));
+});
+document.getElementById("refreshBtn").addEventListener("click", () => loadAll());
+els.refreshCaptchaBtn.addEventListener("click", () => loadCaptcha());
+document.getElementById("logoutBtn").addEventListener("click", () => {
+  state.token = "";
+  localStorage.removeItem("sentinelai_token");
+  stopLivePolling();
+  showLogin();
+  loadCaptcha();
+});
+
+els.loginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!els.captchaAnswer.value) {
+    notify(t("chooseCaptcha"));
+    return;
+  }
+  try {
+    const response = await api("/api/v1/auth/login", {
+      method: "POST",
+      body: {
+        email: els.email.value,
+        password: els.password.value,
+        captchaId: state.captcha?.challengeId,
+        captchaAnswer: els.captchaAnswer.value
+      },
+      auth: false
+    });
+    state.token = response.token;
+    localStorage.setItem("sentinelai_token", state.token);
+    showApp();
+    await loadAll();
+    startLivePolling();
+  } catch (error) {
+    notify(error.message);
+    await loadCaptcha();
+  }
+});
+
+els.providerForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await api("/api/v1/providers", {
+      method: "POST",
+      body: {
+        name: els.providerName.value,
+        providerType: els.providerType.value,
+        endpoint: els.providerEndpoint.value,
+        model: els.providerModel.value,
+        apiKeySecretRef: els.providerSecretRef.value,
+        supportsStructuredOutput: true,
+        supportsToolCalling: els.providerType.value !== "offline_heuristic",
+        enabled: true
+      }
+    });
+    notify(t("saved"));
+    await loadProviders();
+    await loadLive();
+  } catch (error) {
+    notify(error.message);
+  }
+});
+
+els.passwordForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  try {
+    await api("/api/v1/auth/change-password", {
+      method: "POST",
+      body: {
+        currentPassword: els.currentPassword.value,
+        newPassword: els.newPassword.value
+      }
+    });
+    els.currentPassword.value = "";
+    els.newPassword.value = "";
+    notify(t("passwordChanged"));
+  } catch (error) {
+    notify(error.message);
+  }
+});
+
+init();
+
+async function init() {
+  setLanguage(state.lang);
+  await loadStatus();
+  await loadCaptcha();
+  if (state.token) {
+    showApp();
+    await loadAll();
+    startLivePolling();
+  } else {
+    showLogin();
+  }
+}
+
+function setLanguage(lang) {
+  state.lang = lang === "zh-CN" ? "zh-CN" : "en";
+  localStorage.setItem("sentinelai_lang", state.lang);
+  document.documentElement.lang = state.lang;
+  document.querySelectorAll("[data-i18n]").forEach((node) => {
+    node.textContent = t(node.dataset.i18n);
+  });
+  document.querySelectorAll("[data-lang]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.lang === state.lang);
+  });
+  renderAll();
+}
+
+function t(key) {
+  return I18N[state.lang][key] || I18N.en[key] || key;
+}
+
+function showLogin() {
+  els.loginPanel.classList.remove("is-hidden");
+  els.appShell.classList.add("is-hidden");
+}
+
+function showApp() {
+  els.loginPanel.classList.add("is-hidden");
+  els.appShell.classList.remove("is-hidden");
+}
+
+function activateTab(name) {
+  document.querySelectorAll(".tab[data-tab]").forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.tab === name);
+  });
+  document.querySelectorAll(".view").forEach((view) => {
+    view.classList.toggle("is-active", view.id === `${name}View`);
+  });
+}
+
+async function loadCaptcha() {
+  state.captcha = await api("/api/v1/auth/captcha", { auth: false });
+  els.captchaQuestion.textContent = state.captcha.question;
+  els.captchaProof.textContent = `proof ${state.captcha.proof} / ${state.captcha.mode}`;
+  els.captchaAnswer.value = "";
+  els.captchaChoices.innerHTML = state.captcha.choices.map((choice) => `
+    <button type="button" data-choice="${escapeHtml(choice)}">${escapeHtml(choice)}</button>
+  `).join("");
+  els.captchaChoices.querySelectorAll("[data-choice]").forEach((button) => {
+    button.addEventListener("click", () => {
+      els.captchaAnswer.value = button.dataset.choice;
+      els.captchaChoices.querySelectorAll("button").forEach((item) => item.classList.toggle("is-active", item === button));
+    });
+  });
+}
+
+async function loadAll() {
+  await Promise.all([loadStatus(), loadIncidents(), loadProviders(), loadAgents(), loadAudit(), loadVisitors(), loadEvents()]);
+  renderAll();
+}
+
+async function loadLive() {
+  if (!state.token) return;
+  const response = await api("/api/v1/monitor/live");
+  state.status = response.status;
+  state.incidents = response.incidents || [];
+  state.events = response.events || [];
+  state.visitors = response.visitors || [];
+  state.audit = response.audit || [];
+  if (!state.providers.length && response.activeProvider) {
+    state.providers = [response.activeProvider];
+  }
+  renderAll();
+}
+
+async function loadStatus() {
+  state.status = await api("/api/v1/status", { auth: false });
+  els.statusStrip.textContent = state.status.ok ? `ONLINE // ${state.status.version}` : "OFFLINE";
+}
+
+async function loadIncidents() {
+  const response = await api("/api/v1/incidents?limit=50");
+  state.incidents = response.items || [];
+  if (!state.selectedIncidentId && state.incidents.length > 0) {
+    state.selectedIncidentId = state.incidents[0].id;
+  }
+  if (state.selectedIncidentId) {
+    await selectIncident(state.selectedIncidentId, false);
+  }
+}
+
+async function loadProviders() {
+  const response = await api("/api/v1/providers");
+  state.providers = response.items || [];
+}
+
+async function loadAgents() {
+  const response = await api("/api/v1/agents");
+  state.agents = response.items || [];
+}
+
+async function loadAudit() {
+  const response = await api("/api/v1/audit-logs?limit=80");
+  state.audit = response.items || [];
+}
+
+async function loadVisitors() {
+  const response = await api("/api/v1/visitors?limit=100");
+  state.visitors = response.items || [];
+}
+
+async function loadEvents() {
+  const response = await api("/api/v1/events?limit=80");
+  state.events = response.items || [];
+}
+
+function startLivePolling() {
+  stopLivePolling();
+  state.liveTimer = window.setInterval(() => loadLive().catch((error) => notify(error.message)), 5000);
+}
+
+function stopLivePolling() {
+  if (state.liveTimer) {
+    window.clearInterval(state.liveTimer);
+    state.liveTimer = null;
+  }
+}
+
+function renderAll() {
+  renderOverview();
+  renderIncidents();
+  renderVisitors();
+  renderEvents();
+  renderProviders();
+  renderAudit();
+}
+
+function renderOverview() {
+  if (!els.metrics) return;
+  const counts = state.status?.counts || {};
+  const critical = state.incidents.filter((item) => item.severity === "critical").length;
+  const waiting = state.incidents.filter((item) => item.status === "needs_approval" || item.status === "containment_recommended").length;
+  const activeProvider = state.providers.find((provider) => provider.active) || state.providers[0];
+  els.metrics.innerHTML = [
+    metric("Incidents", counts.incidents || 0),
+    metric("Critical", critical),
+    metric("Visitors", counts.visitors || state.visitors.length || 0),
+    metric("Model", activeProvider ? activeProvider.model : "offline")
+  ].join("");
+  els.liveIncidentList.innerHTML = renderIncidentRows(state.incidents.slice(0, 8), "compact");
+  els.liveVisitorList.innerHTML = renderVisitorRows(state.visitors.slice(0, 8), true);
+  const waitingBadge = waiting > 0 ? `${waiting} ${state.lang === "zh-CN" ? "待处理" : "waiting"}` : "clear";
+  els.statusStrip.textContent = `ONLINE // ${waitingBadge}`;
+}
+
+function metric(label, value) {
+  return `<div class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`;
+}
+
+function renderIncidents() {
+  els.incidentList.innerHTML = renderIncidentRows(state.incidents, "full");
+  els.incidentList.querySelectorAll(".incident-row").forEach((row) => {
+    row.addEventListener("click", () => selectIncident(row.dataset.id));
+  });
+}
+
+function renderIncidentRows(items, mode) {
+  if (!items.length) return `<p class="muted">${t("noData")}</p>`;
+  return items.map((incident) => `
+    <article class="incident-row ${incident.id === state.selectedIncidentId ? "is-active" : ""}" data-id="${incident.id || ""}">
+      <div class="badge-line">
+        <span class="badge severity-${incident.severity}">${escapeHtml(incident.severity)}</span>
+        <span class="badge severity-${incident.status}">${escapeHtml(incident.status)}</span>
+      </div>
+      <h4>${escapeHtml(incident.title)}</h4>
+      <p>${escapeHtml(incident.summary || "")}</p>
+      <p>${t("trust")} ${escapeHtml(String(incident.trustScore))} / ${escapeHtml(incident.createdAt || "")}</p>
+    </article>
+  `).join("");
+}
+
+async function selectIncident(id, rerender = true) {
+  state.selectedIncidentId = id;
+  if (rerender) renderIncidents();
+  const incident = await api(`/api/v1/incidents/${id}`);
+  els.incidentDetail.innerHTML = `
+    <div class="stack-row">
+      <div class="badge-line">
+        <span class="badge severity-${incident.severity}">${escapeHtml(incident.severity)}</span>
+        <span class="badge severity-${incident.status}">${escapeHtml(incident.status)}</span>
+        <span class="badge">${t("trust")} ${incident.trustScore}</span>
+      </div>
+      <h3>${escapeHtml(incident.title)}</h3>
+      <p class="muted">${escapeHtml(incident.summary)}</p>
+      <div class="badge-line">
+        <button class="primary-action" data-action="approve" data-id="${incident.id}">${t("approve")}</button>
+        <button data-action="reject" data-id="${incident.id}">${t("reject")}</button>
+      </div>
+    </div>
+    <h3>:// ACTIONS</h3>
+    <div>${renderActions(incident.actionRuns || [])}</div>
+    <h3>:// ANALYSIS</h3>
+    <pre class="object-view">${escapeHtml(JSON.stringify(incident.analysis, null, 2))}</pre>
+    <h3>:// EVIDENCE</h3>
+    <pre class="object-view">${escapeHtml(JSON.stringify(incident.event, null, 2))}</pre>
+  `;
+  els.incidentDetail.querySelectorAll("button[data-action]").forEach((button) => {
+    button.addEventListener("click", () => handleIncidentCommand(button.dataset.action, button.dataset.id));
+  });
+  els.incidentDetail.querySelectorAll("button[data-run]").forEach((button) => {
+    button.addEventListener("click", () => executeRun(button.dataset.run));
+  });
+}
+
+function renderActions(actionRuns) {
+  if (!actionRuns.length) return `<p class="muted">${t("noData")}</p>`;
+  return actionRuns.map((run) => `
+    <div class="action-row">
+      <div>
+        <strong>${escapeHtml(run.actionId)}</strong>
+        <p class="muted">${escapeHtml(JSON.stringify(run.parameters))}</p>
+      </div>
+      <div class="badge-line">
+        <span class="badge severity-${run.status}">${escapeHtml(run.status)}</span>
+        <button data-run="${run.id}">${t("run")}</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+function renderVisitors() {
+  els.visitorList.innerHTML = renderVisitorRows(state.visitors, false);
+}
+
+function renderVisitorRows(items, compact) {
+  if (!items.length) return `<p class="muted">${t("noData")}</p>`;
+  return items.map((visitor) => `
+    <div class="${compact ? "stack-row" : "table-row"}">
+      <strong>${escapeHtml(visitor.ip)}</strong>
+      <span>${escapeHtml(visitor.method)} ${escapeHtml(visitor.path)}</span>
+      <span class="muted">${escapeHtml(visitor.createdAt)}</span>
+      ${compact ? "" : `<span class="muted">${escapeHtml(visitor.userAgent)}</span>`}
+    </div>
+  `).join("");
+}
+
+function renderEvents() {
+  if (!state.events.length) {
+    els.eventContentList.innerHTML = `<p class="muted">${t("noData")}</p>`;
+    return;
+  }
+  els.eventContentList.innerHTML = state.events.map((event) => `
+    <article class="content-row">
+      <div>
+        <span class="badge severity-${event.severityHint}">${escapeHtml(event.severityHint)}</span>
+        <h3>${escapeHtml(event.category)}</h3>
+        <p class="muted">${escapeHtml(event.source)} / ${escapeHtml(event.receivedAt)}</p>
+      </div>
+      <pre class="object-view">${escapeHtml(JSON.stringify({
+        actor: event.actor,
+        asset: event.asset,
+        labels: event.labels,
+        payload: event.redactedPayload,
+        score: event.score
+      }, null, 2))}</pre>
+    </article>
+  `).join("");
+}
+
+function renderProviders() {
+  if (!state.providers.length) {
+    els.providerList.innerHTML = `<p class="muted">${t("noData")}</p>`;
+    return;
+  }
+  els.providerList.innerHTML = state.providers.map((provider) => `
+    <div class="provider-row">
+      <div>
+        <div class="badge-line">
+          <strong>${escapeHtml(provider.name)}</strong>
+          ${provider.active ? `<span class="badge severity-ready">${t("active")}</span>` : ""}
+        </div>
+        <p class="muted">${escapeHtml(provider.providerType)} / ${escapeHtml(provider.model)} / ${escapeHtml(provider.endpoint || "local")}</p>
+        <p class="muted">${escapeHtml(provider.apiKeySecretRef || "no secret reference")}</p>
+      </div>
+      <button data-provider="${provider.id}">${t("activate")}</button>
+    </div>
+  `).join("");
+  els.providerList.querySelectorAll("[data-provider]").forEach((button) => {
+    button.addEventListener("click", () => activateProvider(button.dataset.provider));
+  });
+}
+
+function renderAudit() {
+  if (!state.audit.length) {
+    els.auditList.innerHTML = `<p class="muted">${t("noData")}</p>`;
+    return;
+  }
+  els.auditList.innerHTML = state.audit.map((entry) => `
+    <div class="table-row">
+      <strong>${escapeHtml(entry.action)}</strong>
+      <span>${escapeHtml(entry.actor)} -> ${escapeHtml(entry.target)}</span>
+      <span class="muted">${escapeHtml(entry.createdAt)}</span>
+    </div>
+  `).join("");
+}
+
+async function handleIncidentCommand(action, incidentId) {
+  try {
+    if (action === "approve") {
+      await api(`/api/v1/incidents/${incidentId}/approve`, { method: "POST", body: {} });
+    }
+    if (action === "reject") {
+      await api(`/api/v1/incidents/${incidentId}/reject`, { method: "POST", body: { reason: "dashboard decision" } });
+    }
+    await loadAll();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function executeRun(actionRunId) {
+  try {
+    await api(`/api/v1/action-runs/${actionRunId}/execute`, { method: "POST", body: {} });
+    notify("OK");
+    await loadAll();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function activateProvider(providerId) {
+  try {
+    await api(`/api/v1/providers/${providerId}/activate`, { method: "POST", body: {} });
+    notify(t("activated"));
+    await loadProviders();
+    renderProviders();
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function api(path, options = {}) {
+  const headers = { "Content-Type": "application/json" };
+  if (options.auth !== false) {
+    headers.Authorization = `Bearer ${state.token}`;
+  }
+  const response = await fetch(path, {
+    method: options.method || "GET",
+    headers,
+    body: options.body ? JSON.stringify(options.body) : undefined
+  });
+  const data = response.status === 204 ? {} : await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || `HTTP ${response.status}`);
+  }
+  return data;
+}
+
+function notify(message) {
+  els.toast.textContent = message;
+  els.toast.classList.add("is-visible");
+  window.setTimeout(() => els.toast.classList.remove("is-visible"), 3600);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
