@@ -17,6 +17,8 @@ class Settings:
     auditor_token: str = "dev-auditor-token"
     ingest_token: str = "dev-ingest-token"
     allow_system_actions: bool = False
+    allowed_origins: tuple[str, ...] = ()
+    frame_ancestors: str = "'self'"
 
     @classmethod
     def from_env(
@@ -39,5 +41,10 @@ class Settings:
             auditor_token=os.getenv("SENTINELAI_AUDITOR_TOKEN", "dev-auditor-token"),
             ingest_token=os.getenv("SENTINELAI_INGEST_TOKEN", "dev-ingest-token"),
             allow_system_actions=os.getenv("SENTINELAI_ENABLE_SYSTEM_ACTIONS", "").lower() in {"1", "true", "yes"},
+            allowed_origins=_split_csv(os.getenv("SENTINELAI_ALLOWED_ORIGINS", "")),
+            frame_ancestors=os.getenv("SENTINELAI_FRAME_ANCESTORS", "'self'"),
         )
 
+
+def _split_csv(value: str) -> tuple[str, ...]:
+    return tuple(item.strip() for item in value.split(",") if item.strip())

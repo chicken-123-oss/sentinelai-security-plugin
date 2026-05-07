@@ -105,6 +105,7 @@ class SecurityApp:
                     "activeProvider": self.storage.get_active_provider(),
                     "incidents": self.storage.list_incidents(limit=12),
                     "events": self.storage.list_events(limit=24),
+                    "eventIndex": self.storage.list_event_index(limit=80),
                     "visitors": self.storage.list_visitors(limit=24),
                     "agents": self.storage.list_agents(),
                     "audit": self.storage.list_audit_logs(limit=12),
@@ -150,6 +151,11 @@ class SecurityApp:
             self._require_view(handler)
             limit = _int_query(query, "limit", 80)
             _send_json(handler, 200, {"items": self.storage.list_events(limit=limit)})
+            return
+        if path == "/api/v1/events/index":
+            self._require_view(handler)
+            limit = _int_query(query, "limit", 160)
+            _send_json(handler, 200, self.storage.list_event_index(limit=limit))
             return
         if path == "/api/v1/visitors":
             self._require_view(handler)
@@ -512,13 +518,12 @@ def _read_json(handler: BaseHTTPRequestHandler) -> dict[str, Any]:
 
 
 def _send_json(handler: BaseHTTPRequestHandler, status: int, body: dict[str, Any]) -> None:
-    data = json.dumps(body, indent=2, sort_keys=True).encode("utf-8")
+    data = b"" if status == 204 else json.dumps(body, indent=2, sort_keys=True).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Content-Length", str(len(data)))
-    handler.send_header("Access-Control-Allow-Origin", "*")
-    handler.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
-    handler.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+    _send_security_headers(handler, cache_control="no-store")
+    _send_cors_headers(handler)
     handler.end_headers()
     if status != 204:
         handler.wfile.write(data)
@@ -552,8 +557,57 @@ def _send_static(handler: BaseHTTPRequestHandler, relative_path: str) -> None:
     handler.send_response(200)
     handler.send_header("Content-Type", content_type)
     handler.send_header("Content-Length", str(len(data)))
+    _send_security_headers(handler, cache_control="no-store")
     handler.end_headers()
     handler.wfile.write(data)
+
+
+def _send_security_headers(handler: BaseHTTPRequestHandler, *, cache_control: str) -> None:
+    app = getattr(handler.server, "app", None)  # type: ignore[attr-defined]
+    settings = getattr(app, "settings", None)
+    frame_ancestors = str(getattr(settings, "frame_ancestors", "'self'") or "'self'")
+    csp = (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "font-src 'self'; "
+        "object-src 'none'; "
+        "base-uri 'none'; "
+        "form-action 'self'; "
+        f"frame-ancestors {frame_ancestors}"
+    )
+    handler.send_header("Content-Security-Policy", csp)
+    handler.send_header("X-Content-Type-Options", "nosniff")
+    handler.send_header("Referrer-Policy", "no-referrer")
+    handler.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
+    handler.send_header("Cross-Origin-Opener-Policy", "same-origin")
+    if frame_ancestors == "'self'":
+        handler.send_header("X-Frame-Options", "SAMEORIGIN")
+    elif frame_ancestors == "'none'":
+        handler.send_header("X-Frame-Options", "DENY")
+    handler.send_header("Cache-Control", cache_control)
+
+
+def _send_cors_headers(handler: BaseHTTPRequestHandler) -> None:
+    origin = handler.headers.get("Origin", "")
+    if not origin:
+        return
+    handler.send_header("Vary", "Origin")
+    if not _origin_allowed(handler, origin):
+        return
+    handler.send_header("Access-Control-Allow-Origin", origin)
+    handler.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+    handler.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS")
+
+
+def _origin_allowed(handler: BaseHTTPRequestHandler, origin: str) -> bool:
+    app = getattr(handler.server, "app", None)  # type: ignore[attr-defined]
+    settings = getattr(app, "settings", None)
+    allowed = set(getattr(settings, "allowed_origins", ()) or ())
+    allowed.add(_request_origin(handler))
+    return origin in allowed
 
 
 def _int_query(query: dict[str, list[str]], key: str, default: int) -> int:

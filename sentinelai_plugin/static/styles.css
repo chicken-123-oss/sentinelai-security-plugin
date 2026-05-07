@@ -413,6 +413,90 @@ h1 {
   grid-template-columns: minmax(180px, 0.35fr) minmax(280px, 1fr);
 }
 
+.event-index-summary {
+  display: grid;
+  gap: 12px;
+  padding: 14px 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+
+.priority-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.priority-pill {
+  min-height: 72px;
+  border: 1px solid var(--line);
+  background: #0a0c10;
+  padding: 10px;
+}
+
+.priority-pill span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.priority-pill strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 28px;
+}
+
+.priority-critical {
+  border-color: var(--red);
+}
+
+.priority-high {
+  border-color: var(--amber);
+}
+
+.priority-medium {
+  border-color: var(--blue);
+}
+
+.priority-low {
+  border-color: var(--green);
+}
+
+.day-section {
+  display: grid;
+  gap: 0;
+  padding-top: 16px;
+}
+
+.day-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  border-bottom: 1px solid var(--line);
+}
+
+.event-card {
+  align-items: start;
+}
+
+.event-detail-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.attacker-input {
+  display: grid;
+  gap: 8px;
+}
+
+.attacker-input p {
+  margin: 0;
+  color: var(--light);
+  word-break: break-word;
+}
+
 .incident-grid {
   display: grid;
   grid-template-columns: minmax(330px, 0.95fr) minmax(420px, 1.05fr);
@@ -626,6 +710,7 @@ h1 {
   .chat-form,
   .managed-entry-auth,
   .managed-entry-metrics,
+  .priority-metrics,
   .table-row,
   .content-row {
     grid-template-columns: 1fr;

@@ -92,6 +92,31 @@ and direct AI conversation.
 Verification: compileall passed, node --check app.js passed, node --check managed-entry.js passed, unittest 4 tests passed.
 ```
 
+## 2026-05-07
+
+### Event Content Index Update
+
+```text
+Added /api/v1/events/index with score-level priority ranking, day-based indexing,
+attacker-input extraction, and duplicate identical access collapse. The Content tab now
+renders P0/P1/P2/P3 counts, grouped day sections, duplicateCount/firstSeen/lastSeen, and
+escaped detailed attacker-entered content from redacted request payloads. Smoke coverage
+now verifies duplicate event collapse, priority classification, day groups, and visible
+attacker input summaries.
+Verification: compileall passed, node --check app.js passed, node --check managed-entry.js passed, unittest 4 tests passed.
+```
+
+### Console Security Hardening
+
+```text
+Hardened the SentinelAI console itself: replaced wildcard CORS with same-origin default
+plus SENTINELAI_ALLOWED_ORIGINS, added CSP/security/no-store headers, made dashboard
+tokens session-only in the browser, removed managed-entry token loading from URL query
+parameters, and documented SENTINELAI_FRAME_ANCESTORS for trusted embedding. Smoke tests
+now verify CSP, no-referrer/nosniff headers, allowed and blocked CORS behavior, and the
+absence of URL token parsing in managed-entry.js.
+```
+
 Run a demo server:
 
 ```powershell

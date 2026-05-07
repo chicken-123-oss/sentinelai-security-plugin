@@ -96,8 +96,33 @@ class ApiSmokeTests(unittest.TestCase):
 
                 live = request(base_url, "/api/v1/monitor/live", token="admin-token", method="GET")
                 self.assertGreaterEqual(len(live["events"]), 1)
+                self.assertIn("eventIndex", live)
                 self.assertIn("visitors", live)
                 self.assertIn("agents", live)
+
+                duplicate_incident = request(
+                    base_url,
+                    "/api/v1/events/ingest",
+                    token="ingest-token",
+                    body={
+                        "source": "nginx",
+                        "category": "request",
+                        "trustLabel": "low",
+                        "severityHint": "high",
+                        "actor": {"type": "ip", "id": "203.0.113.9", "ip": "203.0.113.9"},
+                        "asset": {"kind": "site", "id": "/login"},
+                        "payload": {"body": "username=admin' OR '1'='1"},
+                    },
+                )
+                self.assertEqual(duplicate_incident["severity"], "high")
+                event_index = request(base_url, "/api/v1/events/index", token="admin-token", method="GET")
+                self.assertGreaterEqual(event_index["duplicatesCollapsed"], 1)
+                self.assertGreaterEqual(event_index["priorityCounts"]["high"], 1)
+                self.assertGreaterEqual(len(event_index["days"]), 1)
+                indexed_login = next(item for item in event_index["items"] if item["asset"]["id"] == "/login")
+                self.assertEqual(indexed_login["duplicateCount"], 2)
+                self.assertEqual(indexed_login["priority"]["level"], "high")
+                self.assertIn("username=admin", indexed_login["attackerInput"]["summary"])
 
                 managed_summary = request(base_url, "/api/v1/managed-site/summary", token="ingest-token", method="GET")
                 self.assertIn("consoleUrl", managed_summary)
@@ -106,6 +131,31 @@ class ApiSmokeTests(unittest.TestCase):
 
                 managed_entry_html = request_text(base_url, "/managed-entry", method="GET")
                 self.assertIn("managed-entry.js", managed_entry_html)
+
+                headers = response_headers(base_url, "/", method="GET")
+                self.assertIn("Content-Security-Policy", headers)
+                self.assertIn("frame-ancestors 'self'", headers["Content-Security-Policy"])
+                self.assertEqual(headers.get("X-Content-Type-Options"), "nosniff")
+                self.assertEqual(headers.get("Referrer-Policy"), "no-referrer")
+
+                same_origin_headers = response_headers(
+                    base_url,
+                    "/api/v1/status",
+                    method="GET",
+                    headers={"Origin": base_url},
+                )
+                self.assertEqual(same_origin_headers.get("Access-Control-Allow-Origin"), base_url)
+                blocked_origin_headers = response_headers(
+                    base_url,
+                    "/api/v1/status",
+                    method="GET",
+                    headers={"Origin": "https://evil.example"},
+                )
+                self.assertNotIn("Access-Control-Allow-Origin", blocked_origin_headers)
+
+                managed_entry_js = request_text(base_url, "/static/managed-entry.js", method="GET")
+                self.assertNotIn("URLSearchParams", managed_entry_js)
+                self.assertIn("sessionStorage", managed_entry_js)
 
                 chat = request(
                     base_url,
@@ -176,6 +226,19 @@ def request_text(base_url, path, *, method="GET", token=None, body=None):
     req = urllib.request.Request(base_url + path, data=data, headers=headers, method=method)
     with urllib.request.urlopen(req, timeout=10) as response:
         return response.read().decode("utf-8")
+
+
+def response_headers(base_url, path, *, method="GET", token=None, body=None, headers=None):
+    request_headers = {"Content-Type": "application/json"}
+    request_headers.update(headers or {})
+    data = None
+    if token:
+        request_headers["Authorization"] = f"Bearer {token}"
+    if body is not None:
+        data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(base_url + path, data=data, headers=request_headers, method=method)
+    with urllib.request.urlopen(req, timeout=10) as response:
+        return dict(response.headers.items())
 
 
 def captcha_answer(question):

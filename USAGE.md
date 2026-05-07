@@ -59,6 +59,8 @@ Environment variables:
 | `SENTINELAI_ENABLE_SYSTEM_ACTIONS` | Enables local high-impact actions when set to `true` | disabled |
 | `SENTINELAI_ALLOWED_PATHS` | Path allowlist for quarantine actions | data directory only |
 | `SENTINELAI_ALLOWED_SERVICES` | Comma-separated service names for restart actions | empty |
+| `SENTINELAI_ALLOWED_ORIGINS` | Comma-separated extra browser origins allowed by CORS | same-origin only |
+| `SENTINELAI_FRAME_ANCESTORS` | CSP `frame-ancestors` value for managed-entry embedding | `'self'` |
 
 ## 4. Dashboard Workflow
 
@@ -67,12 +69,13 @@ Environment variables:
 3. Complete the advanced CAPTCHA challenge and sign in as the owner.
 4. Review the Monitor page for real-time incident counts, live lists, visitor records, active model, and action mode.
 5. Open Incidents to inspect rule matches, redacted evidence, structured analysis, and recommended action runs.
-6. Open Content to view monitored event payloads after redaction.
-7. Open Visitors to inspect recent request paths, methods, IPs, user agents, and timestamps.
-8. Use Approve or Reject to record the human decision.
-9. Run approved or policy-ready actions from the incident detail panel.
-10. Open AI Chat to talk directly with the connected large-model provider about status, incidents, visitors, or model access. The managed-site agent is used as context.
-11. Check Models, Account, and Audit for model-provider selection, password changes, and operator history.
+6. Open Content to view the event priority index. Events are grouped by day, ranked by score level, and duplicate identical accesses are collapsed into one row with `duplicateCount`.
+7. Expand event details to inspect attacker-entered content such as request body, query string, command, path, and other redacted payload fields.
+8. Open Visitors to inspect recent request paths, methods, IPs, user agents, and timestamps.
+9. Use Approve or Reject to record the human decision.
+10. Run approved or policy-ready actions from the incident detail panel.
+11. Open AI Chat to talk directly with the connected large-model provider about status, incidents, visitors, or model access. The managed-site agent is used as context.
+12. Check Models, Account, and Audit for model-provider selection, password changes, and operator history.
 
 High-impact actions are dry-run by default. `capture_evidence` writes a redacted JSON artifact under `data/evidence`. `block_ip` records the IP under `data/blocked_ips.json` as a connector-safe simulation.
 
@@ -172,6 +175,13 @@ Invoke-RestMethod -Method Get -Uri http://127.0.0.1:8787/api/v1/monitor/live `
   -Headers @{ Authorization = "Bearer $token" }
 ```
 
+Get the indexed event content feed:
+
+```powershell
+Invoke-RestMethod -Method Get -Uri http://127.0.0.1:8787/api/v1/events/index `
+  -Headers @{ Authorization = "Bearer $token" }
+```
+
 Load the managed-site backend entry summary:
 
 ```powershell
@@ -260,6 +270,54 @@ Recommended adapter mapping:
 | Process watcher | `source=process`, `category=proc_spawn` | Put process name in `asset.id`, PID/command in `payload`. |
 | Threat feed | `source=threat_feed`, `category=ioc_match` | Put matched IOC and feed name in `labels`/`payload`. |
 
+### Event Content Index
+
+Use the indexed feed when building an operations console:
+
+```text
+GET /api/v1/events/index?limit=160
+```
+
+The endpoint returns:
+
+```json
+{
+  "priorityCounts": { "critical": 0, "high": 1, "medium": 0, "low": 0 },
+  "rawEventCount": 2,
+  "uniqueEventCount": 1,
+  "duplicatesCollapsed": 1,
+  "days": [
+    {
+      "day": "2026-05-07",
+      "count": 1,
+      "items": [
+        {
+          "priority": { "rank": 1, "level": "high", "label": "P1 High" },
+          "duplicateCount": 2,
+          "firstSeen": "2026-05-07T10:00:00Z",
+          "lastSeen": "2026-05-07T10:03:00Z",
+          "attackerInput": {
+            "summary": "body=username=admin' OR '1'='1",
+            "fields": { "body": "username=admin' OR '1'='1" }
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+Priority levels are derived from `trustScore`, `riskScore`, and severity:
+
+| Level | Meaning |
+| --- | --- |
+| `critical` / `P0` | trust 0-29, risk 70-100, or critical severity |
+| `high` / `P1` | trust 30-59, risk 40-69, or high severity |
+| `medium` / `P2` | trust 60-89, risk 10-39, or medium severity |
+| `low` / `P3` | trust 90-100 and low risk |
+
+Deduplication uses source, category, actor IP/id, asset path, request method, path, query, and attacker-entered body/command. The stored event is still escaped in the browser and redacted before persistence, so operators can inspect malicious input without exposing passwords, cookies, bearer tokens, or secrets.
+
 ### Visitor Record Contract
 
 Send real visitor records to:
@@ -289,7 +347,7 @@ SentinelAI exposes an embeddable backend entry page for an existing managed webs
 GET /managed-entry
 ```
 
-The page reads a bearer token from `?token=...`, from the browser's existing SentinelAI local storage, or from the token input shown in the entry panel. It displays compact status, incident, visitor, agent, and model information, then provides an "Open Console" redirect button to the full plugin dashboard.
+The page requires the operator to paste a token or reuse a same-tab session token. It no longer reads bearer tokens from URL query parameters, because URLs can leak through logs, screenshots, browser history, and referrers. It displays compact status, incident, visitor, agent, and model information, then provides an "Open Console" redirect button to the full plugin dashboard.
 
 For safer production deployments, prefer a server-side admin-portal proxy instead of putting tokens into URLs:
 
@@ -497,6 +555,9 @@ The tests cover deterministic scoring, redaction and incident storage, login, ev
 
 - Replace all default tokens and passwords.
 - Put the API behind TLS and a real authentication boundary.
+- Browser CORS is same-origin by default. Add trusted admin portal origins with `SENTINELAI_ALLOWED_ORIGINS`, not `*`.
+- The console sends CSP, `nosniff`, no-referrer, permissions, and frame-ancestor headers. Set `SENTINELAI_FRAME_ANCESTORS` only when a trusted admin portal must embed `/managed-entry`.
+- Dashboard bearer tokens are kept in `sessionStorage`, not persistent `localStorage`; managed-entry does not read tokens from URL query parameters.
 - Connect `block_ip`, `disable_account`, `quarantine_file`, and similar actions to audited production connectors instead of granting arbitrary shell access.
 - Keep external LLM providers optional. Detection continues through local rules when the model is unavailable.
 - Use a proper secret manager for server bootstrap credentials. The current MVP stores only provider secret references, not raw keys.

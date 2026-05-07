@@ -8,6 +8,7 @@ The implementation combines both supplied plans into a runnable MVP:
 - Control plane API: a stdlib HTTP server with JSON endpoints.
 - Storage and audit center: SQLite tables for events, incidents, action runs, agents, providers, and audit logs.
 - Visitor telemetry: request path, method, source IP, user agent, first seen, last seen, and visit count are stored for dashboard visitor records.
+- Event indexing: monitored content is ranked by score level, grouped by day, enriched with attacker-input details, and deduplicated by identical access fingerprint.
 - Host-agent interface: a simulator that checks in and ingests events through a bearer-token channel.
 - Managed-site backend entry: a compact summary endpoint and `/managed-entry` page for existing admin portals, including a redirect button to the full SentinelAI console.
 - Connected AI conversation channel: persisted operator messages and model replies through the active large-model provider, grounded in current SentinelAI state with an offline fallback.
@@ -65,6 +66,21 @@ Thresholds:
 | 0-29 | containment_recommended |
 
 Rules currently detect SQL injection, XSS, path traversal, login bursts, unusual admin logins, sensitive file changes, sensitive file access, web process shell spawning, suspicious egress, privileged account changes, and IOC matches.
+
+## Event Priority And Content Index
+
+`GET /api/v1/events/index` returns a console-ready event index. Each event receives a priority object:
+
+| Priority | Score Level |
+| --- | --- |
+| `P0 Critical` | trust 0-29, risk 70-100, or critical severity |
+| `P1 High` | trust 30-59, risk 40-69, or high severity |
+| `P2 Medium` | trust 60-89, risk 10-39, or medium severity |
+| `P3 Low` | trust 90-100 and low risk |
+
+The index also computes day groups from `receivedAt`, priority counts, unique event counts, and duplicate-collapsed counts. Duplicate identical accesses are fingerprinted from source, category, actor IP/id, asset id, request method, request path, query string, and attacker-entered body/command. Repeated scanner hits remain visible through `duplicateCount`, `firstSeen`, and `lastSeen` rather than creating noisy repeated rows.
+
+Attacker content is exposed as `attackerInput.summary` and `attackerInput.fields`. This pulls request body, query string, form fields, path, command, payload, and similar evidence from the redacted payload so operators can inspect what was submitted. Sensitive keys and inline credentials are redacted before persistence, and the frontend escapes the displayed content.
 
 ## LLM Adapter Layer
 
@@ -134,6 +150,9 @@ The plugin dashboard also includes an AI Chat view. It loads connected managed-s
 - Managed entry summaries can be read with admin, auditor, or ingest tokens; production portals should call this server side rather than exposing long-lived tokens in browser JavaScript.
 - Agent chat writes an audit record and requires owner/admin permission for new messages; auditors can read existing history.
 - Login requires a one-time CAPTCHA challenge and a valid password.
+- CORS defaults to same-origin and only allows extra trusted origins configured through `SENTINELAI_ALLOWED_ORIGINS`.
+- Static and API responses include CSP, `X-Content-Type-Options`, referrer policy, permissions policy, frame-ancestor, and no-store cache controls.
+- Dashboard bearer tokens use browser session storage. Managed-entry does not load tokens from URL query parameters.
 - Passwords are stored with PBKDF2-HMAC-SHA256 and per-password salt.
 - The LLM adapter cannot directly execute actions.
 - High-impact actions require human approval.
@@ -163,6 +182,7 @@ The dashboard views are:
 - Incidents: incident list, detail view, redacted evidence, action runs.
 - Visitors: visitor records.
 - Content: monitored event payloads and scoring output.
+- Content: priority-ranked event index by day, attacker-input detail, and duplicate-access collapse.
 - Models: owner-selected large model provider profiles and activation.
 - AI Chat: direct conversation with the connected model provider using managed-site context.
 - Account: password change.

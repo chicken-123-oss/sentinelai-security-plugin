@@ -33,7 +33,7 @@ const ENTRY_I18N = {
 
 const entryState = {
   lang: localStorage.getItem("sentinelai_lang") || "en",
-  token: new URLSearchParams(window.location.search).get("token") || localStorage.getItem("sentinelai_token") || "",
+  token: sessionStorage.getItem("sentinelai_token") || "",
   summary: null
 };
 
@@ -54,7 +54,7 @@ document.querySelectorAll("[data-lang]").forEach((button) => {
 entryEls.form.addEventListener("submit", async (event) => {
   event.preventDefault();
   entryState.token = entryEls.token.value.trim();
-  localStorage.setItem("sentinelai_token", entryState.token);
+  sessionStorage.setItem("sentinelai_token", entryState.token);
   await loadEntrySummary();
 });
 

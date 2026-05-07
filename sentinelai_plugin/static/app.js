@@ -23,6 +23,17 @@ const I18N = {
     refresh: "Refresh",
     incidentCenter: "Incident Center",
     monitoredContent: "Monitored Content",
+    eventPriorityIndex: "Event Priority Index",
+    eventIndexHint: "Events are grouped by day and score level; duplicate identical accesses are collapsed.",
+    uniqueAccesses: "Unique Accesses",
+    duplicatesCollapsed: "Duplicates Collapsed",
+    attackerInput: "Attacker Input",
+    fullEvent: "Full Event",
+    firstSeen: "First Seen",
+    priorityCritical: "P0 Critical",
+    priorityHigh: "P1 High",
+    priorityMedium: "P2 Medium",
+    priorityLow: "P3 Low",
     modelAccess: "Large Model API Access",
     modelHint: "Choose any provider independently; store secret references, not raw keys.",
     saveModel: "Save Model",
@@ -77,6 +88,17 @@ const I18N = {
     refresh: "刷新",
     incidentCenter: "事件中心",
     monitoredContent: "监控内容",
+    eventPriorityIndex: "事件优先级索引",
+    eventIndexHint: "事件按日期和评分等级分组；相同访问会合并去重。",
+    uniqueAccesses: "去重访问",
+    duplicatesCollapsed: "已合并重复",
+    attackerInput: "攻击者输入内容",
+    fullEvent: "完整事件",
+    firstSeen: "首次出现",
+    priorityCritical: "P0 严重",
+    priorityHigh: "P1 高危",
+    priorityMedium: "P2 中危",
+    priorityLow: "P3 低危",
     modelAccess: "大模型 API 接入",
     modelHint: "用户可自主选择大模型供应商；保存密钥引用而非明文密钥。",
     saveModel: "保存模型",
@@ -110,11 +132,12 @@ const I18N = {
 };
 
 const state = {
-  token: localStorage.getItem("sentinelai_token") || "",
+  token: sessionStorage.getItem("sentinelai_token") || localStorage.getItem("sentinelai_token") || "",
   lang: localStorage.getItem("sentinelai_lang") || "en",
   captcha: null,
   incidents: [],
   events: [],
+  eventIndex: null,
   visitors: [],
   providers: [],
   agents: [],
@@ -125,6 +148,11 @@ const state = {
   status: null,
   liveTimer: null
 };
+
+if (state.token) {
+  sessionStorage.setItem("sentinelai_token", state.token);
+  localStorage.removeItem("sentinelai_token");
+}
 
 const els = {
   loginPanel: document.getElementById("loginPanel"),
@@ -174,6 +202,7 @@ document.getElementById("refreshBtn").addEventListener("click", () => loadAll())
 els.refreshCaptchaBtn.addEventListener("click", () => loadCaptcha());
 document.getElementById("logoutBtn").addEventListener("click", () => {
   state.token = "";
+  sessionStorage.removeItem("sentinelai_token");
   localStorage.removeItem("sentinelai_token");
   stopLivePolling();
   showLogin();
@@ -198,7 +227,8 @@ els.loginForm.addEventListener("submit", async (event) => {
       auth: false
     });
     state.token = response.token;
-    localStorage.setItem("sentinelai_token", state.token);
+    sessionStorage.setItem("sentinelai_token", state.token);
+    localStorage.removeItem("sentinelai_token");
     showApp();
     await loadAll();
     startLivePolling();
@@ -343,6 +373,7 @@ async function loadLive() {
   state.status = response.status;
   state.incidents = response.incidents || [];
   state.events = response.events || [];
+  state.eventIndex = response.eventIndex || state.eventIndex;
   state.visitors = response.visitors || [];
   state.agents = response.agents || state.agents || [];
   if ((!state.selectedAgentId || !state.agents.some((agent) => agent.id === state.selectedAgentId)) && state.agents.length > 0) {
@@ -404,7 +435,8 @@ async function loadVisitors() {
 }
 
 async function loadEvents() {
-  const response = await api("/api/v1/events?limit=80");
+  const response = await api("/api/v1/events/index?limit=160");
+  state.eventIndex = response;
   state.events = response.items || [];
 }
 
@@ -540,26 +572,95 @@ function renderVisitorRows(items, compact) {
 }
 
 function renderEvents() {
+  const index = state.eventIndex || { items: state.events, days: [], priorityCounts: {}, uniqueEventCount: state.events.length, duplicatesCollapsed: 0 };
+  const days = index.days && index.days.length ? index.days : [{ day: "recent", count: state.events.length, items: state.events }];
   if (!state.events.length) {
     els.eventContentList.innerHTML = `<p class="muted">${t("noData")}</p>`;
     return;
   }
-  els.eventContentList.innerHTML = state.events.map((event) => `
-    <article class="content-row">
+  els.eventContentList.innerHTML = `
+    <section class="event-index-summary">
       <div>
-        <span class="badge severity-${event.severityHint}">${escapeHtml(event.severityHint)}</span>
+        <p class="eyebrow">:// ${t("eventPriorityIndex")}</p>
+        <p class="muted">${t("eventIndexHint")}</p>
+      </div>
+      <div class="priority-metrics">
+        ${priorityMetric("critical", index.priorityCounts?.critical || 0)}
+        ${priorityMetric("high", index.priorityCounts?.high || 0)}
+        ${priorityMetric("medium", index.priorityCounts?.medium || 0)}
+        ${priorityMetric("low", index.priorityCounts?.low || 0)}
+      </div>
+      <div class="badge-line">
+        <span class="badge">${t("uniqueAccesses")} ${escapeHtml(index.uniqueEventCount || state.events.length)}</span>
+        <span class="badge">${t("duplicatesCollapsed")} ${escapeHtml(index.duplicatesCollapsed || 0)}</span>
+      </div>
+    </section>
+    ${days.map((day) => `
+      <section class="day-section">
+        <div class="day-header">
+          <h3>${escapeHtml(day.day)}</h3>
+          <span class="badge">${escapeHtml(day.count || day.items.length)}</span>
+        </div>
+        ${(day.items || []).map((event) => renderEventCard(event)).join("")}
+      </section>
+    `).join("")}
+  `;
+}
+
+function priorityMetric(level, count) {
+  return `
+    <div class="priority-pill priority-${level}">
+      <span>${escapeHtml(priorityLabel(level))}</span>
+      <strong>${escapeHtml(count)}</strong>
+    </div>
+  `;
+}
+
+function priorityLabel(level) {
+  return {
+    critical: t("priorityCritical"),
+    high: t("priorityHigh"),
+    medium: t("priorityMedium"),
+    low: t("priorityLow")
+  }[level] || level;
+}
+
+function renderEventCard(event) {
+  const priority = event.priority || {};
+  const attackerInput = event.attackerInput || { summary: "", fields: {} };
+  return `
+    <article class="content-row event-card">
+      <div>
+        <div class="badge-line">
+          <span class="badge severity-${escapeHtml(priority.level || event.severityHint)}">${escapeHtml(priority.label || event.severityHint)}</span>
+          <span class="badge severity-${escapeHtml(event.score?.severity || event.severityHint)}">${escapeHtml(event.score?.severity || event.severityHint)}</span>
+          ${event.duplicateCount > 1 ? `<span class="badge">x${escapeHtml(event.duplicateCount)}</span>` : ""}
+        </div>
         <h3>${escapeHtml(event.category)}</h3>
         <p class="muted">${escapeHtml(event.source)} / ${escapeHtml(event.receivedAt)}</p>
+        <p class="muted">${t("trust")} ${escapeHtml(event.score?.trustScore ?? "")} / risk ${escapeHtml(event.score?.riskScore ?? "")}</p>
+        <p class="muted">${t("firstSeen")} ${escapeHtml(event.firstSeen || event.receivedAt)} / ${t("lastSeen")} ${escapeHtml(event.lastSeen || event.receivedAt)}</p>
       </div>
-      <pre class="object-view">${escapeHtml(JSON.stringify({
-        actor: event.actor,
-        asset: event.asset,
-        labels: event.labels,
-        payload: event.redactedPayload,
-        score: event.score
-      }, null, 2))}</pre>
+      <div class="event-detail-stack">
+        <section class="attacker-input">
+          <strong>${t("attackerInput")}</strong>
+          <p>${escapeHtml(attackerInput.summary || t("noData"))}</p>
+          <pre class="object-view">${escapeHtml(JSON.stringify(attackerInput.fields || {}, null, 2))}</pre>
+        </section>
+        <details>
+          <summary>${t("fullEvent")}</summary>
+          <pre class="object-view">${escapeHtml(JSON.stringify({
+            actor: event.actor,
+            asset: event.asset,
+            labels: event.labels,
+            payload: event.redactedPayload,
+            score: event.score,
+            priority: event.priority
+          }, null, 2))}</pre>
+        </details>
+      </div>
     </article>
-  `).join("");
+  `;
 }
 
 function renderProviders() {

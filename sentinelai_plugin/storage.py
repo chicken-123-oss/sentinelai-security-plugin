@@ -180,6 +180,7 @@ class Storage:
             _ensure_column(conn, "visitor_records", "visit_count", "INTEGER DEFAULT 1")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_visitor_records_fingerprint ON visitor_records (fingerprint)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_messages_agent_time ON agent_messages (agent_id, created_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_events_received_at ON events (received_at)")
             conn.execute("UPDATE visitor_records SET first_seen = COALESCE(first_seen, created_at), last_seen = COALESCE(last_seen, created_at), visit_count = COALESCE(visit_count, 1)")
             for row in conn.execute("SELECT id, ip, user_agent, path, method FROM visitor_records WHERE fingerprint IS NULL OR fingerprint = ''").fetchall():
                 conn.execute(
@@ -540,6 +541,67 @@ class Storage:
             rows = conn.execute("SELECT * FROM events ORDER BY received_at DESC LIMIT ?", (limit,)).fetchall()
         return [_event_from_row(row) for row in rows]
 
+    def list_event_index(self, limit: int = 160) -> dict[str, Any]:
+        capped_limit = max(1, min(limit, 500))
+        with self._lock, self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM events ORDER BY received_at DESC LIMIT ?",
+                (max(capped_limit * 4, capped_limit),),
+            ).fetchall()
+        raw_events = [_event_from_row(row) for row in rows]
+        unique_events: list[dict[str, Any]] = []
+        by_key: dict[str, dict[str, Any]] = {}
+
+        for event in raw_events:
+            key = _event_access_fingerprint(event)
+            event["dedupeKey"] = key
+            event["duplicateCount"] = 1
+            event["firstSeen"] = event["receivedAt"]
+            event["lastSeen"] = event["receivedAt"]
+            existing = by_key.get(key)
+            if existing is None:
+                by_key[key] = event
+                unique_events.append(event)
+                continue
+            existing["duplicateCount"] = int(existing.get("duplicateCount") or 1) + 1
+            existing["firstSeen"] = min(str(existing.get("firstSeen") or existing["receivedAt"]), event["receivedAt"])
+            existing["lastSeen"] = max(str(existing.get("lastSeen") or existing["receivedAt"]), event["receivedAt"])
+            if event["priority"]["rank"] < existing["priority"]["rank"]:
+                event["duplicateCount"] = existing["duplicateCount"]
+                event["firstSeen"] = existing["firstSeen"]
+                event["lastSeen"] = existing["lastSeen"]
+                by_key[key] = event
+                unique_events[unique_events.index(existing)] = event
+
+        unique_events = sorted(unique_events, key=lambda item: str(item["lastSeen"]), reverse=True)
+        unique_events = sorted(unique_events, key=lambda item: int(item["priority"]["rank"]))
+        unique_events = sorted(unique_events, key=lambda item: str(item["day"]), reverse=True)
+        unique_events = unique_events[:capped_limit]
+
+        priority_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+        day_map: dict[str, dict[str, Any]] = {}
+        for event in unique_events:
+            level = str(event["priority"]["level"])
+            priority_counts[level] = priority_counts.get(level, 0) + 1
+            day = str(event["day"])
+            group = day_map.setdefault(day, {"day": day, "count": 0, "items": []})
+            group["count"] += 1
+            group["items"].append(event)
+
+        days = sorted(day_map.values(), key=lambda item: item["day"], reverse=True)
+        for day in days:
+            day["items"].sort(key=lambda item: str(item["lastSeen"]), reverse=True)
+            day["items"].sort(key=lambda item: int(item["priority"]["rank"]))
+
+        return {
+            "items": unique_events,
+            "days": days,
+            "priorityCounts": priority_counts,
+            "rawEventCount": len(raw_events),
+            "uniqueEventCount": len(unique_events),
+            "duplicatesCollapsed": max(0, len(raw_events) - len(by_key)),
+        }
+
     def get_incident_bundle(self, incident_id: str) -> dict[str, Any] | None:
         with self._lock, self.connect() as conn:
             incident_row = conn.execute("SELECT * FROM incidents WHERE id = ?", (incident_id,)).fetchone()
@@ -808,7 +870,7 @@ def _incident_from_row(row: sqlite3.Row) -> dict[str, Any]:
 
 
 def _event_from_row(row: sqlite3.Row) -> dict[str, Any]:
-    return {
+    event = {
         "eventId": row["event_id"],
         "tenantId": row["tenant_id"],
         "siteId": row["site_id"],
@@ -826,6 +888,10 @@ def _event_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "rawArtifactRef": row["raw_artifact_ref"],
         "score": _load(row["score_json"]),
     }
+    event["priority"] = _event_priority(event)
+    event["day"] = _event_day(str(event["receivedAt"]))
+    event["attackerInput"] = _attacker_input(event)
+    return event
 
 
 def _action_from_row(row: sqlite3.Row) -> dict[str, Any]:
@@ -910,6 +976,91 @@ def _visitor_from_row(row: sqlite3.Row) -> dict[str, Any]:
 
 def _parse_time(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _event_priority(event: dict[str, Any]) -> dict[str, Any]:
+    score = event.get("score") if isinstance(event.get("score"), dict) else {}
+    trust_score = int(score.get("trustScore", 100))
+    risk_score = int(score.get("riskScore", max(0, 100 - trust_score)))
+    severity = str(score.get("severity") or event.get("severityHint") or "info")
+    if trust_score < 30 or risk_score >= 70 or severity == "critical":
+        return {"rank": 0, "level": "critical", "label": "P0 Critical", "scoreBand": "trust 0-29 / risk 70-100"}
+    if trust_score < 60 or risk_score >= 40 or severity == "high":
+        return {"rank": 1, "level": "high", "label": "P1 High", "scoreBand": "trust 30-59 / risk 40-69"}
+    if trust_score < 90 or risk_score >= 10 or severity == "medium":
+        return {"rank": 2, "level": "medium", "label": "P2 Medium", "scoreBand": "trust 60-89 / risk 10-39"}
+    return {"rank": 3, "level": "low", "label": "P3 Low", "scoreBand": "trust 90-100 / risk 0-9"}
+
+
+def _event_day(received_at: str) -> str:
+    return received_at[:10] if len(received_at) >= 10 else "unknown"
+
+
+def _attacker_input(event: dict[str, Any]) -> dict[str, Any]:
+    payload = event.get("redactedPayload") if isinstance(event.get("redactedPayload"), dict) else {}
+    fields: dict[str, Any] = {}
+    interesting_keys = (
+        "method",
+        "path",
+        "url",
+        "query",
+        "queryString",
+        "params",
+        "body",
+        "requestBody",
+        "form",
+        "username",
+        "user",
+        "command",
+        "payload",
+    )
+    for key in interesting_keys:
+        if key in payload:
+            fields[key] = payload[key]
+    if not fields and payload:
+        fields = payload
+    summary_parts = []
+    for key in ("method", "path", "query", "body", "requestBody", "command", "payload"):
+        value = fields.get(key)
+        if value not in (None, ""):
+            summary_parts.append(f"{key}={_compact_text(value)}")
+    if not summary_parts:
+        actor = event.get("actor") if isinstance(event.get("actor"), dict) else {}
+        asset = event.get("asset") if isinstance(event.get("asset"), dict) else {}
+        summary_parts = [_compact_text(actor.get("id") or actor.get("ip") or "unknown"), _compact_text(asset.get("id") or "unknown")]
+    return {
+        "summary": " / ".join(summary_parts)[:500],
+        "fields": fields,
+    }
+
+
+def _compact_text(value: Any) -> str:
+    if isinstance(value, (dict, list)):
+        value = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    text = str(value).replace("\r", " ").replace("\n", " ").strip()
+    return text[:180]
+
+
+def _event_access_fingerprint(event: dict[str, Any]) -> str:
+    actor = event.get("actor") if isinstance(event.get("actor"), dict) else {}
+    asset = event.get("asset") if isinstance(event.get("asset"), dict) else {}
+    payload = event.get("redactedPayload") if isinstance(event.get("redactedPayload"), dict) else {}
+    material = json.dumps(
+        {
+            "source": event.get("source"),
+            "category": event.get("category"),
+            "actorIp": actor.get("ip"),
+            "actorId": actor.get("id"),
+            "assetId": asset.get("id"),
+            "method": payload.get("method"),
+            "path": payload.get("path") or asset.get("id"),
+            "query": payload.get("query") or payload.get("queryString"),
+            "body": payload.get("body") or payload.get("requestBody") or payload.get("payload") or payload.get("command"),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
 def _visitor_fingerprint(ip: str, user_agent: str, path: str, method: str) -> str:
