@@ -254,6 +254,43 @@ class Storage:
                 "auditLogs": _count(conn, "audit_logs"),
             }
 
+    def attack_category_summary(self) -> dict[str, Any]:
+        with self._lock, self.connect() as conn:
+            top_row = conn.execute(
+                """
+                SELECT category, COUNT(*) AS count
+                FROM events
+                GROUP BY category
+                ORDER BY count DESC, MAX(received_at) DESC, category ASC
+                LIMIT 1
+                """
+            ).fetchone()
+            latest_row = conn.execute(
+                """
+                SELECT category, source, received_at
+                FROM events
+                ORDER BY received_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
+            total = _count(conn, "events")
+        return {
+            "totalEvents": total,
+            "topCategory": {
+                "category": top_row["category"],
+                "count": int(top_row["count"]),
+            }
+            if top_row is not None
+            else None,
+            "latestCategory": {
+                "category": latest_row["category"],
+                "source": latest_row["source"],
+                "receivedAt": latest_row["received_at"],
+            }
+            if latest_row is not None
+            else None,
+        }
+
     def current_time(self) -> str:
         return utc_now()
 

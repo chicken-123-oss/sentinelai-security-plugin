@@ -163,6 +163,15 @@ and asset-impact layers, and model JSON parsing tolerates fenced Markdown JSON c
 returned by chat models.
 ```
 
+### Monitor Summary Metrics
+
+```text
+Added a live attack-category summary to /api/v1/monitor/live and surfaced it on the
+Monitor page. The overview now displays the active model, event count, visitor count,
+most frequent attack category, and latest attack category. Metric cards now use a
+responsive grid and wrap long model names safely.
+```
+
 Run a demo server:
 
 ```powershell

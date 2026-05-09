@@ -99,6 +99,10 @@ class ApiSmokeTests(unittest.TestCase):
                 live = request(base_url, "/api/v1/monitor/live", token="admin-token", method="GET")
                 self.assertGreaterEqual(len(live["events"]), 1)
                 self.assertIn("eventIndex", live)
+                self.assertIn("attackSummary", live)
+                self.assertEqual(live["attackSummary"]["totalEvents"], 1)
+                self.assertEqual(live["attackSummary"]["topCategory"]["category"], "request")
+                self.assertEqual(live["attackSummary"]["latestCategory"]["category"], "request")
                 self.assertIn("visitors", live)
                 self.assertIn("agents", live)
 

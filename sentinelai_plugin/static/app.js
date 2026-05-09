@@ -139,6 +139,8 @@ const state = {
   events: [],
   eventIndex: null,
   missionTheme: null,
+  attackSummary: null,
+  activeProvider: null,
   visitors: [],
   providers: [],
   agents: [],
@@ -422,6 +424,7 @@ async function loadLive() {
   state.incidents = response.incidents || [];
   state.events = response.events || [];
   state.eventIndex = response.eventIndex || state.eventIndex;
+  state.attackSummary = response.attackSummary || state.attackSummary;
   state.visitors = response.visitors || [];
   state.agents = response.agents || state.agents || [];
   if ((!state.selectedAgentId || !state.agents.some((agent) => agent.id === state.selectedAgentId)) && state.agents.length > 0) {
@@ -430,6 +433,9 @@ async function loadLive() {
   state.audit = response.audit || [];
   if (!state.providers.length && response.activeProvider) {
     state.providers = [response.activeProvider];
+  }
+  if (response.activeProvider) {
+    state.activeProvider = response.activeProvider;
   }
   renderAll();
 }
@@ -490,6 +496,7 @@ async function loadEvents() {
 
 function startLivePolling() {
   stopLivePolling();
+  loadLive().catch((error) => notify(error.message));
   state.liveTimer = window.setInterval(() => loadLive().catch((error) => notify(error.message)), 5000);
 }
 
@@ -599,14 +606,18 @@ function fallbackMissionTheme() {
 function renderOverview() {
   if (!els.metrics) return;
   const counts = state.status?.counts || {};
-  const critical = state.incidents.filter((item) => item.severity === "critical").length;
   const waiting = state.incidents.filter((item) => item.status === "needs_approval" || item.status === "containment_recommended").length;
-  const activeProvider = state.providers.find((provider) => provider.active) || state.providers[0];
+  const activeProvider = state.activeProvider || state.providers.find((provider) => provider.active) || state.providers[0];
+  const attackSummary = state.attackSummary || attackSummaryFromEvents();
+  const topCategory = attackSummary.topCategory;
+  const latestCategory = attackSummary.latestCategory;
+  const labels = overviewMetricLabels();
   els.metrics.innerHTML = [
-    metric("Incidents", counts.incidents || 0),
-    metric("Critical", critical),
-    metric("Visitors", counts.visitors || state.visitors.length || 0),
-    metric("Model", activeProvider ? activeProvider.model : "offline")
+    metric(labels.model, activeProvider ? activeProvider.model : "offline"),
+    metric(labels.events, attackSummary.totalEvents ?? counts.events ?? state.events.length),
+    metric(labels.visitors, counts.visitors || state.visitors.length || 0),
+    metric(labels.topAttack, topCategory ? `${topCategory.category} x${topCategory.count}` : labels.none),
+    metric(labels.latestAttack, latestCategory ? latestCategory.category : labels.none)
   ].join("");
   els.liveIncidentList.innerHTML = renderIncidentRows(state.incidents.slice(0, 8), "compact");
   els.liveVisitorList.innerHTML = renderVisitorRows(state.visitors.slice(0, 8), true);
@@ -616,6 +627,43 @@ function renderOverview() {
 
 function metric(label, value) {
   return `<div class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(String(value))}</strong></div>`;
+}
+
+function overviewMetricLabels() {
+  if (state.lang === "zh-CN") {
+    return {
+      model: "当前模型",
+      events: "事件个数",
+      visitors: "访客数量",
+      topAttack: "攻击最多类别",
+      latestAttack: "最新攻击类别",
+      none: "暂无"
+    };
+  }
+  return {
+    model: "Current Model",
+    events: "Events",
+    visitors: "Visitors",
+    topAttack: "Top Attack",
+    latestAttack: "Latest Attack",
+    none: "None"
+  };
+}
+
+function attackSummaryFromEvents() {
+  const counts = {};
+  const events = state.eventIndex?.items?.length ? state.eventIndex.items : state.events;
+  events.forEach((event) => {
+    const category = event.category || "unknown";
+    counts[category] = (counts[category] || 0) + Number(event.duplicateCount || 1);
+  });
+  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const latest = state.events[0] || events[0];
+  return {
+    totalEvents: state.status?.counts?.events ?? state.events.length,
+    topCategory: sorted.length ? { category: sorted[0][0], count: sorted[0][1] } : null,
+    latestCategory: latest ? { category: latest.category || "unknown", receivedAt: latest.receivedAt } : null
+  };
 }
 
 function renderIncidents() {

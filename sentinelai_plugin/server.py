@@ -106,6 +106,7 @@ class SecurityApp:
                     "incidents": self.storage.list_incidents(limit=12),
                     "events": self.storage.list_events(limit=24),
                     "eventIndex": self.storage.list_event_index(limit=80),
+                    "attackSummary": self.storage.attack_category_summary(),
                     "visitors": self.storage.list_visitors(limit=24),
                     "agents": self.storage.list_agents(),
                     "audit": self.storage.list_audit_logs(limit=12),

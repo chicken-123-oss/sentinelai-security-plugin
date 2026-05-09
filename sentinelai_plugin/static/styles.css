@@ -338,7 +338,7 @@ h1 {
 .metrics,
 .two-col {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 12px;
 }
 
@@ -362,8 +362,9 @@ h1 {
 .metric strong {
   display: block;
   margin-top: 12px;
-  font-size: 42px;
+  font-size: clamp(24px, 2.2vw, 42px);
   line-height: 1;
+  overflow-wrap: anywhere;
 }
 
 .panel {
