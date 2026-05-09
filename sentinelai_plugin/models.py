@@ -39,6 +39,45 @@ ROLE_SECURITY_ADMIN = "SECURITY_ADMIN"
 ROLE_AUDITOR = "AUDITOR"
 ROLE_AGENT = "AGENT"
 
+PROVIDER_DEFAULTS = {
+    "offline_heuristic": {
+        "name": "Offline Heuristic Analyzer",
+        "endpoint": "",
+        "model": "sentinelai-offline-v1",
+        "apiKeySecretRef": "",
+    },
+    "deepseek": {
+        "name": "DeepSeek Security Analyzer",
+        "endpoint": "https://api.deepseek.com",
+        "model": "deepseek-v4-flash",
+        "apiKeySecretRef": "DEEPSEEK_API_KEY",
+    },
+    "glm": {
+        "name": "Zhipu GLM Security Analyzer",
+        "endpoint": "https://open.bigmodel.cn/api/paas/v4/",
+        "model": "glm-5",
+        "apiKeySecretRef": "ZAI_API_KEY",
+    },
+    "zhipu": {
+        "name": "Zhipu GLM Security Analyzer",
+        "endpoint": "https://open.bigmodel.cn/api/paas/v4/",
+        "model": "glm-5",
+        "apiKeySecretRef": "ZAI_API_KEY",
+    },
+    "kimi": {
+        "name": "Kimi Security Analyzer",
+        "endpoint": "https://api.moonshot.ai/v1",
+        "model": "kimi-k2.6",
+        "apiKeySecretRef": "MOONSHOT_API_KEY",
+    },
+    "moonshot": {
+        "name": "Kimi Security Analyzer",
+        "endpoint": "https://api.moonshot.ai/v1",
+        "model": "kimi-k2.6",
+        "apiKeySecretRef": "MOONSHOT_API_KEY",
+    },
+}
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -104,15 +143,15 @@ def normalize_provider(raw: JsonDict) -> JsonDict:
     if not isinstance(raw, dict):
         raise ValueError("provider must be a JSON object")
     provider_type = str(raw.get("providerType") or "offline_heuristic")
+    defaults = PROVIDER_DEFAULTS.get(provider_type, PROVIDER_DEFAULTS["offline_heuristic"])
     return {
         "id": str(raw.get("id") or make_id("prov")),
-        "name": str(raw.get("name") or "Offline Heuristic Analyzer"),
+        "name": str(raw.get("name") or defaults["name"]),
         "providerType": provider_type,
-        "endpoint": str(raw.get("endpoint") or ""),
-        "model": str(raw.get("model") or "sentinelai-offline-v1"),
-        "apiKeySecretRef": str(raw.get("apiKeySecretRef") or ""),
+        "endpoint": str(raw.get("endpoint") or defaults["endpoint"]),
+        "model": str(raw.get("model") or defaults["model"]),
+        "apiKeySecretRef": str(raw.get("apiKeySecretRef") or defaults["apiKeySecretRef"]),
         "supportsStructuredOutput": bool(raw.get("supportsStructuredOutput", True)),
         "supportsToolCalling": bool(raw.get("supportsToolCalling", False)),
         "enabled": bool(raw.get("enabled", True)),
     }
-

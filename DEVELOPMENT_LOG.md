@@ -117,6 +117,52 @@ now verify CSP, no-referrer/nosniff headers, allowed and blocked CORS behavior, 
 absence of URL token parsing in managed-entry.js.
 ```
 
+### Screenshot-Inspired Frontend Redesign
+
+```text
+Redesigned the console visual system to match the supplied reference image more closely.
+Added dark mineral terrain layers, prism light beams, orbit rings, lime triangular shards,
+clipped HUD panels, and circular mission progress nodes arranged around the real-time
+monitoring surface.
+Added local static mission-map.json to drive node labels, positions, progress totals, and
+link beams. Overview map nodes now switch directly to Monitor, Incidents, Visitors,
+Content, Models, and AI Chat. The implementation remains offline-capable and uses local
+HTML, CSS, JavaScript, and JSON instead of external CDN libraries.
+Verification: compileall passed, node --check app.js passed, node --check managed-entry.js passed, unittest 4 tests passed.
+```
+
+### Centered Monitor Map Adjustment
+
+```text
+Adjusted the overview layout to follow the later reference image: the real-time monitoring
+title now sits in the central-left visual field, node text sizes were tightened to avoid
+overlap, the top navigation was moved to the upper-right HUD row, and the clue unlock
+reward strip was removed from HTML, JavaScript, CSS, and mission-map.json.
+```
+
+### AI API And Agent Framework Validation
+
+```text
+Hardened the connected AI chat path so the current operator question is always passed as
+the latest model message, and stabilized agent message ordering with SQLite rowid tie
+breaks. Added an automated OpenAI-compatible fake model server test that validates both
+/api/v1/ai/chat and event-analysis ingestion with llmAvailable=true and fallbackUsed=false.
+Also ran a live demo-server API integration check against a temporary local compatible
+model endpoint; provider activation, agent check-in, AI chat, model-backed event analysis,
+and /api/v1/status all returned successfully.
+```
+
+### China AI Provider Adaptation
+
+```text
+Added first-class provider types for DeepSeek, Zhipu GLM, and Kimi/Moonshot. Each provider
+has UI presets, backend defaults, secret-reference defaults, OpenAI-compatible adapter
+routing, and automated smoke coverage against a local compatible test model. The model
+prompt now includes the SentinelAI scoring framework with identity, behavior, runtime,
+and asset-impact layers, and model JSON parsing tolerates fenced Markdown JSON commonly
+returned by chat models.
+```
+
 Run a demo server:
 
 ```powershell

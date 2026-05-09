@@ -347,12 +347,12 @@ class Storage:
             rows = conn.execute(
                 """
                 SELECT * FROM (
-                    SELECT * FROM agent_messages
+                    SELECT rowid AS _rowid, * FROM agent_messages
                     WHERE agent_id = ?
-                    ORDER BY created_at DESC
+                    ORDER BY created_at DESC, rowid DESC
                     LIMIT ?
                 )
-                ORDER BY created_at ASC
+                ORDER BY created_at ASC, _rowid ASC
                 """,
                 (agent_id[:120], capped_limit),
             ).fetchall()

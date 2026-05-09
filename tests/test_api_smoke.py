@@ -6,6 +6,7 @@ import unittest
 import urllib.error
 import urllib.request
 import uuid
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from sentinelai_plugin.config import Settings
@@ -30,6 +31,7 @@ class ApiSmokeTests(unittest.TestCase):
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             base_url = f"http://{server.server_address[0]}:{server.server_address[1]}"
+            fake_ai_server, fake_ai_thread, fake_ai_url = start_fake_openai_server()
             try:
                 captcha = request(base_url, "/api/v1/auth/captcha", method="GET")
                 login = request(
@@ -84,7 +86,7 @@ class ApiSmokeTests(unittest.TestCase):
                     body={
                         "name": "Local vLLM",
                         "providerType": "openai_compatible",
-                        "endpoint": "http://127.0.0.1:9999/v1",
+                        "endpoint": f"{fake_ai_url}/v1",
                         "model": "security-model",
                         "apiKeySecretRef": "SENTINELAI_TEST_KEY",
                         "supportsStructuredOutput": True,
@@ -157,18 +159,72 @@ class ApiSmokeTests(unittest.TestCase):
                 self.assertNotIn("URLSearchParams", managed_entry_js)
                 self.assertIn("sessionStorage", managed_entry_js)
 
+                mission_map = request(base_url, "/static/mission-map.json", method="GET")
+                self.assertIn("nodes", mission_map)
+                self.assertGreaterEqual(len(mission_map["nodes"]), 5)
+
                 chat = request(
                     base_url,
                     "/api/v1/ai/chat",
                     token="admin-token",
-                    body={"agentId": "agent_local", "message": "status please"},
+                    body={"agentId": "agent_local", "message": "请报告访客和事件状态"},
                 )
                 self.assertTrue(chat["ok"])
                 self.assertEqual(chat["reply"]["role"], "agent")
                 self.assertEqual(chat["reply"]["metadata"]["source"], "connected-ai-model")
+                self.assertEqual(chat["reply"]["metadata"]["provider"], "Local vLLM")
+                self.assertTrue(chat["llmAvailable"])
+                self.assertFalse(chat["fallbackUsed"])
+                self.assertIn("FAKE_AI_CHAT_OK", chat["reply"]["message"])
                 self.assertIn("provider", chat)
                 history = request(base_url, "/api/v1/ai/chat?agentId=agent_local", token="admin-token", method="GET")
                 self.assertGreaterEqual(len(history["items"]), 2)
+
+                model_incident = request(
+                    base_url,
+                    "/api/v1/events/ingest",
+                    token="ingest-token",
+                    body={
+                        "source": "app",
+                        "category": "request",
+                        "trustLabel": "low",
+                        "severityHint": "high",
+                        "actor": {"type": "ip", "id": "198.51.100.91", "ip": "198.51.100.91"},
+                        "asset": {"kind": "site", "id": "/api/search"},
+                        "payload": {"query": "<script>alert(1)</script>"},
+                    },
+                )
+                self.assertEqual(model_incident["analysis"]["provider"], "Local vLLM")
+                self.assertTrue(model_incident["analysis"]["llmAvailable"])
+                self.assertFalse(model_incident["analysis"]["fallbackUsed"])
+                self.assertIn("Fake model structured summary", model_incident["analysis"]["summary"])
+
+                for provider_type in ("deepseek", "glm", "kimi"):
+                    china_provider = request(
+                        base_url,
+                        "/api/v1/providers",
+                        token="admin-token",
+                        body={
+                            "name": f"{provider_type} test provider",
+                            "providerType": provider_type,
+                            "endpoint": f"{fake_ai_url}/v1",
+                            "model": f"{provider_type}-test-model",
+                            "apiKeySecretRef": "",
+                            "supportsStructuredOutput": True,
+                            "supportsToolCalling": False,
+                            "enabled": True,
+                        },
+                    )
+                    self.assertTrue(china_provider["active"])
+                    china_chat = request(
+                        base_url,
+                        "/api/v1/ai/chat",
+                        token="admin-token",
+                        body={"agentId": "agent_local", "message": f"{provider_type} status check"},
+                    )
+                    self.assertTrue(china_chat["llmAvailable"])
+                    self.assertFalse(china_chat["fallbackUsed"])
+                    self.assertEqual(china_chat["reply"]["metadata"]["provider"], f"{provider_type} test provider")
 
                 visitor_body = {"ip": "203.0.113.77", "userAgent": "UnitTestScanner/1.0", "path": "/pricing", "method": "GET"}
                 request(base_url, "/api/v1/visitors/record", token="ingest-token", body=visitor_body)
@@ -186,11 +242,53 @@ class ApiSmokeTests(unittest.TestCase):
                 )
                 self.assertTrue(changed["ok"])
             finally:
+                fake_ai_server.shutdown()
+                fake_ai_server.server_close()
+                fake_ai_thread.join(timeout=5)
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=5)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+class FakeOpenAIHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length") or "0")
+        raw = self.rfile.read(length).decode("utf-8")
+        body = json.loads(raw or "{}")
+        messages = body.get("messages") if isinstance(body.get("messages"), list) else []
+        latest_content = str(messages[-1].get("content") if messages else "")
+        if "\"event\"" in latest_content and "\"score\"" in latest_content:
+            content = json.dumps(
+                {
+                    "verdict": "suspicious",
+                    "confidence": 0.88,
+                    "summary": "Fake model structured summary from OpenAI-compatible test server.",
+                    "evidenceSignals": ["fake_model_signal"],
+                    "recommendedActions": [{"actionId": "capture_evidence", "reason": "fake model request"}],
+                    "requiresHumanApproval": True,
+                }
+            )
+        else:
+            content = "FAKE_AI_CHAT_OK: connected model received SentinelAI context and answered the operator."
+        payload = {"choices": [{"message": {"content": content}}]}
+        encoded = json.dumps(payload).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(encoded)))
+        self.end_headers()
+        self.wfile.write(encoded)
+
+    def log_message(self, format, *args):
+        return
+
+
+def start_fake_openai_server():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), FakeOpenAIHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread, f"http://{server.server_address[0]}:{server.server_address[1]}"
 
 
 def request(base_url, path, *, method="POST", token=None, body=None):

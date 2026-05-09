@@ -8,10 +8,23 @@
   </head>
   <body>
     <div class="frame-lines" aria-hidden="true"></div>
+    <div class="scene-backdrop" aria-hidden="true">
+      <span class="spectrum spectrum-a"></span>
+      <span class="spectrum spectrum-b"></span>
+      <span class="orbital orbital-a"></span>
+      <span class="orbital orbital-b"></span>
+      <span class="shard shard-a"></span>
+      <span class="shard shard-b"></span>
+      <span class="shard shard-c"></span>
+      <span class="terrain terrain-a"></span>
+      <span class="terrain terrain-b"></span>
+      <span class="terrain terrain-c"></span>
+    </div>
 
     <header class="site-header">
       <div class="brand-lockup">
-        <span class="brand-mark">S</span>
+        <button class="back-glyph" type="button" aria-label="Back to monitor" data-jump-tab="overview"></button>
+        <span class="brand-mark" aria-hidden="true">S</span>
         <div>
           <p class="eyebrow">// SENTINELAI SECURITY</p>
           <h1 data-i18n="brandTitle">Threat Monitoring Console</h1>
@@ -70,6 +83,7 @@
 
       <section class="view is-active" id="overviewView">
         <div class="hero-panel">
+          <div class="mission-map" id="missionMap" aria-label="Security clue map"></div>
           <div>
             <p class="eyebrow">:// LIVE DATA LINK</p>
             <h2 data-i18n="overviewTitle">Real-Time Monitored Data</h2>
@@ -139,6 +153,9 @@
               <option value="offline_heuristic">offline_heuristic</option>
               <option value="openai">openai</option>
               <option value="azure_openai">azure_openai</option>
+              <option value="deepseek">deepseek</option>
+              <option value="glm">glm</option>
+              <option value="kimi">kimi</option>
               <option value="anthropic">anthropic</option>
               <option value="gemini">gemini</option>
               <option value="openai_compatible">openai_compatible</option>

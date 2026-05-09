@@ -139,11 +139,7 @@ class OpenAICompatibleAdapter:
             "messages": [
                 {
                     "role": "system",
-                    "content": (
-                        "You are a security incident analyst. Return compact JSON only with "
-                        "verdict, confidence, summary, evidenceSignals, recommendedActions, "
-                        "and requiresHumanApproval. Do not execute actions."
-                    ),
+                    "content": _analysis_system_prompt(),
                 },
                 {"role": "user", "content": json.dumps({"event": event, "score": score}, sort_keys=True)},
             ],
@@ -156,7 +152,7 @@ class OpenAICompatibleAdapter:
             with urllib.request.urlopen(request, timeout=12) as response:
                 payload = json.loads(response.read().decode("utf-8"))
             content = payload["choices"][0]["message"]["content"]
-            parsed = json.loads(content)
+            parsed = _parse_model_json(content)
             return _normalize_model_result(parsed, self.profile.get("name") or self.name)
         except (KeyError, json.JSONDecodeError, TimeoutError, urllib.error.URLError, urllib.error.HTTPError, OSError) as exc:
             return self._fallback(event, score, f"model fallback: {exc}")
@@ -224,7 +220,7 @@ class OllamaAdapter:
             )
             with urllib.request.urlopen(request, timeout=12) as response:
                 payload = json.loads(response.read().decode("utf-8"))
-            parsed = json.loads(payload["message"]["content"])
+            parsed = _parse_model_json(payload["message"]["content"])
             return _normalize_model_result(parsed, self.profile.get("name") or self.name)
         except (KeyError, json.JSONDecodeError, TimeoutError, urllib.error.URLError, urllib.error.HTTPError, OSError) as exc:
             result = self.fallback.analyze(event, score)
@@ -259,7 +255,7 @@ class OllamaAdapter:
 
 def build_adapter(profile: dict[str, Any] | None = None) -> LLMAdapter:
     provider_type = str((profile or {}).get("providerType") or "offline_heuristic")
-    if provider_type in {"openai", "azure_openai", "openai_compatible", "vllm"}:
+    if provider_type in {"openai", "azure_openai", "openai_compatible", "vllm", "deepseek", "glm", "zhipu", "kimi", "moonshot"}:
         return OpenAICompatibleAdapter(profile or {})
     if provider_type == "ollama":
         return OllamaAdapter(profile or {})
@@ -296,6 +292,62 @@ def _normalize_model_result(raw: dict[str, Any], provider_name: str) -> dict[str
     }
 
 
+def _analysis_system_prompt() -> str:
+    return (
+        "You are a security incident analyst inside SentinelAI Security Plugin. "
+        "Use the supplied deterministic SentinelAI score as the source of truth. "
+        "The scoring framework has four layers: identity, behavior, runtime, and assetImpact. "
+        "Identity covers user/IP/service identity trust, authentication anomalies, privilege changes, and actor reputation. "
+        "Behavior covers request patterns, attacker input, scanner activity, and abuse signatures. "
+        "Runtime covers process, file, network, and host-agent telemetry. "
+        "AssetImpact covers the protected site, account, service, file, or data impact. "
+        "Do not reveal hidden chain-of-thought; summarize evidence and reasoning briefly. "
+        "Return compact JSON only with verdict, confidence, summary, evidenceSignals, recommendedActions, "
+        "and requiresHumanApproval. Do not execute actions and do not override approval policy."
+    )
+
+
+def _scoring_framework_context() -> dict[str, Any]:
+    return {
+        "framework": "sentinelai-risk-v1",
+        "dimensions": ["identity", "behavior", "runtime", "assetImpact"],
+        "identityLayer": {
+            "purpose": "Evaluate actor identity trust, authentication anomalies, privilege changes, and source reputation.",
+            "inputs": ["actor.type", "actor.id", "actor.ip", "trustLabel", "login labels", "admin role changes"],
+        },
+        "policy": "Rules produce trust/risk scores and approval gates; the model may explain or recommend catalog actions but cannot execute them.",
+    }
+
+
+def _parse_model_json(content: Any) -> dict[str, Any]:
+    text = str(content or "").strip()
+    if not text:
+        raise json.JSONDecodeError("empty model response", "", 0)
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].lstrip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        fenced = "\n".join(lines).strip()
+        parsed = json.loads(fenced)
+        if isinstance(parsed, dict):
+            return parsed
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        parsed = json.loads(text[start : end + 1])
+        if isinstance(parsed, dict):
+            return parsed
+    raise json.JSONDecodeError("model response did not contain a JSON object", text, 0)
+
+
 def _chat_messages(messages: list[dict[str, str]], context: dict[str, Any]) -> list[dict[str, str]]:
     safe_context = {
         "counts": context.get("counts"),
@@ -303,10 +355,13 @@ def _chat_messages(messages: list[dict[str, str]], context: dict[str, Any]) -> l
         "agent": context.get("agent"),
         "incidents": context.get("incidents"),
         "visitors": context.get("visitors"),
+        "scoringFramework": _scoring_framework_context(),
     }
     system = (
         "You are the connected AI assistant inside SentinelAI Security Plugin. "
         "Answer the operator's chat question using the current monitored website security context. "
+        "Use the SentinelAI scoring framework when discussing risk: identity, behavior, runtime, and assetImpact. "
+        "Do not reveal hidden chain-of-thought; provide concise evidence summaries instead. "
         "Do not claim to execute remediation actions, do not expose secrets, and keep answers concise. "
         "If the user writes Chinese, answer in Chinese; otherwise answer in English."
     )

@@ -430,6 +430,8 @@ class SecurityApp:
             {"role": "assistant" if item["role"] == "agent" else item["role"], "content": item["message"]}
             for item in prior_messages
         ]
+        if not chat_messages or chat_messages[-1]["role"] != "user" or chat_messages[-1]["content"] != message:
+            chat_messages.append({"role": "user", "content": message})
         context = {
             "counts": counts,
             "activeProvider": active_provider,
@@ -546,7 +548,7 @@ def _send_error(handler: BaseHTTPRequestHandler, status: int, message: str, code
 
 def _send_static(handler: BaseHTTPRequestHandler, relative_path: str) -> None:
     safe_name = Path(relative_path).name
-    if safe_name not in {"index.html", "app.js", "styles.css", "managed-entry.html", "managed-entry.js"}:
+    if safe_name not in {"index.html", "app.js", "styles.css", "managed-entry.html", "managed-entry.js", "mission-map.json"}:
         raise ApiError(404, "static file not found")
     static_dir = Path(__file__).with_name("static")
     file_path = static_dir / safe_name

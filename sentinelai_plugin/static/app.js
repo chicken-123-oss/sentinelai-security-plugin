@@ -138,6 +138,7 @@ const state = {
   incidents: [],
   events: [],
   eventIndex: null,
+  missionTheme: null,
   visitors: [],
   providers: [],
   agents: [],
@@ -147,6 +148,39 @@ const state = {
   selectedAgentId: "",
   status: null,
   liveTimer: null
+};
+
+const PROVIDER_PRESETS = {
+  offline_heuristic: {
+    name: "Offline Heuristic Analyzer",
+    endpoint: "",
+    model: "sentinelai-offline-v1",
+    secretRef: ""
+  },
+  deepseek: {
+    name: "DeepSeek Security Analyzer",
+    endpoint: "https://api.deepseek.com",
+    model: "deepseek-v4-flash",
+    secretRef: "DEEPSEEK_API_KEY"
+  },
+  glm: {
+    name: "Zhipu GLM Security Analyzer",
+    endpoint: "https://open.bigmodel.cn/api/paas/v4/",
+    model: "glm-5",
+    secretRef: "ZAI_API_KEY"
+  },
+  kimi: {
+    name: "Kimi Security Analyzer",
+    endpoint: "https://api.moonshot.ai/v1",
+    model: "kimi-k2.6",
+    secretRef: "MOONSHOT_API_KEY"
+  },
+  ollama: {
+    name: "Local Ollama Analyzer",
+    endpoint: "http://127.0.0.1:11434",
+    model: "llama3",
+    secretRef: ""
+  }
 };
 
 if (state.token) {
@@ -167,6 +201,7 @@ const els = {
   refreshCaptchaBtn: document.getElementById("refreshCaptchaBtn"),
   statusStrip: document.getElementById("statusStrip"),
   metrics: document.getElementById("metrics"),
+  missionMap: document.getElementById("missionMap"),
   liveIncidentList: document.getElementById("liveIncidentList"),
   liveVisitorList: document.getElementById("liveVisitorList"),
   incidentList: document.getElementById("incidentList"),
@@ -194,6 +229,9 @@ const els = {
 
 document.querySelectorAll(".tab[data-tab]").forEach((button) => {
   button.addEventListener("click", () => activateTab(button.dataset.tab));
+});
+document.querySelectorAll("[data-jump-tab]").forEach((button) => {
+  button.addEventListener("click", () => activateTab(button.dataset.jumpTab));
 });
 document.querySelectorAll("[data-lang]").forEach((button) => {
   button.addEventListener("click", () => setLanguage(button.dataset.lang));
@@ -261,6 +299,7 @@ els.providerForm.addEventListener("submit", async (event) => {
     notify(error.message);
   }
 });
+els.providerType.addEventListener("change", () => applyProviderPreset(els.providerType.value));
 
 els.passwordForm.addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -295,6 +334,7 @@ init();
 
 async function init() {
   setLanguage(state.lang);
+  await loadMissionTheme();
   await loadStatus();
   await loadCaptcha();
   if (state.token) {
@@ -359,6 +399,14 @@ async function loadCaptcha() {
       els.captchaChoices.querySelectorAll("button").forEach((item) => item.classList.toggle("is-active", item === button));
     });
   });
+}
+
+async function loadMissionTheme() {
+  try {
+    state.missionTheme = await api("/static/mission-map.json", { auth: false });
+  } catch (error) {
+    state.missionTheme = fallbackMissionTheme();
+  }
 }
 
 async function loadAll() {
@@ -453,6 +501,7 @@ function stopLivePolling() {
 }
 
 function renderAll() {
+  renderMissionMap();
   renderOverview();
   renderIncidents();
   renderVisitors();
@@ -460,6 +509,91 @@ function renderAll() {
   renderProviders();
   renderAgentChat();
   renderAudit();
+}
+
+function renderMissionMap() {
+  if (!els.missionMap || !state.missionTheme) return;
+  const nodes = state.missionTheme.nodes || [];
+  const beams = state.missionTheme.beams || [];
+  const nodeById = Object.fromEntries(nodes.map((node) => [node.id, node]));
+
+  els.missionMap.innerHTML = `
+    <div class="map-core" aria-hidden="true">
+      <span class="core-chair"></span>
+      <span class="core-stone core-stone-a"></span>
+      <span class="core-stone core-stone-b"></span>
+      <span class="core-ring"></span>
+    </div>
+    <svg class="map-links" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+      ${beams.map((beam) => renderBeam(beam, nodeById)).join("")}
+    </svg>
+    ${nodes.map((node) => renderMissionNode(node)).join("")}
+  `;
+  els.missionMap.querySelectorAll("[data-map-tab]").forEach((button) => {
+    button.addEventListener("click", () => activateTab(button.dataset.mapTab));
+  });
+}
+
+function renderBeam(beam, nodeById) {
+  const from = nodeById[beam.from];
+  const to = nodeById[beam.to];
+  if (!from || !to) return "";
+  const color = beam.tone === "lime" ? "#b9f21d" : "rgba(244, 248, 244, 0.78)";
+  return `<line x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" stroke="${color}" stroke-width="${beam.tone === "lime" ? 0.36 : 0.22}" vector-effect="non-scaling-stroke" />`;
+}
+
+function renderMissionNode(node) {
+  const value = missionValue(node);
+  const total = Math.max(Number(node.total || 1), value);
+  const capped = Math.min(value, total);
+  const label = state.lang === "zh-CN" ? node.labelZh : node.labelEn;
+  const prefix = state.lang === "zh-CN" ? node.prefixZh : node.prefixEn;
+  const active = document.querySelector(`.tab.is-active[data-tab="${node.tab}"]`) ? "is-current" : "";
+  const completed = value > 0 ? "is-unlocked" : "";
+  return `
+    <button class="mission-node ${active} ${completed} tone-${escapeHtml(node.tone || "white")}" data-node-id="${escapeHtml(node.id)}" data-map-tab="${escapeHtml(node.tab)}">
+      <span class="node-score"><strong>${escapeHtml(capped)}</strong>/<small>${escapeHtml(total)}</small></span>
+      <span class="node-copy">
+        <span>${escapeHtml(prefix || "")}</span>
+        <strong>${escapeHtml(label || node.id)}</strong>
+        <i></i>
+      </span>
+    </button>
+  `;
+}
+
+function missionValue(node) {
+  const counts = state.status?.counts || {};
+  const activeProvider = state.providers.find((provider) => provider.active) || state.providers[0];
+  const values = {
+    agents: state.agents.length || counts.agents || 0,
+    incidents: counts.incidents || state.incidents.length || 0,
+    visitors: counts.visitors || state.visitors.length || 0,
+    events: state.eventIndex?.uniqueEventCount || counts.events || state.events.length || 0,
+    providers: activeProvider ? 1 : (counts.providers || state.providers.length || 0),
+    agentMessages: counts.agentMessages || state.agentMessages.length || 0
+  };
+  return Number(values[node.metric] || 0);
+}
+
+function fallbackMissionTheme() {
+  return {
+    nodes: [
+      { id: "overview", tab: "overview", labelEn: "REMAINS", labelZh: "留存", prefixEn: "Unlocked", prefixZh: "已解锁", metric: "agents", total: 4, x: 47, y: 40, tone: "white" },
+      { id: "incidents", tab: "incidents", labelEn: "PREPARATIONS", labelZh: "前序", prefixEn: "Completed", prefixZh: "已完成", metric: "incidents", total: 5, x: 65, y: 48, tone: "white" },
+      { id: "visitors", tab: "visitors", labelEn: "ELSEWHERE", labelZh: "别处", prefixEn: "Completed", prefixZh: "已完成", metric: "visitors", total: 25, x: 25, y: 60, tone: "lime" },
+      { id: "content", tab: "content", labelEn: "MEMORIES", labelZh: "记忆", prefixEn: "Completed", prefixZh: "已完成", metric: "events", total: 5, x: 45, y: 76, tone: "lime" },
+      { id: "providers", tab: "providers", labelEn: "INTERFACE", labelZh: "接口", prefixEn: "Active", prefixZh: "已启用", metric: "providers", total: 3, x: 72, y: 70, tone: "white" },
+      { id: "agent", tab: "agent", labelEn: "INTELLIGENCE", labelZh: "智能", prefixEn: "Linked", prefixZh: "已连接", metric: "agentMessages", total: 8, x: 55, y: 43, tone: "lime" }
+    ],
+    beams: [
+      { from: "visitors", to: "content", tone: "lime" },
+      { from: "content", to: "agent", tone: "lime" },
+      { from: "agent", to: "incidents", tone: "white" },
+      { from: "overview", to: "agent", tone: "white" },
+      { from: "agent", to: "providers", tone: "white" }
+    ]
+  };
 }
 
 function renderOverview() {
@@ -684,6 +818,15 @@ function renderProviders() {
   els.providerList.querySelectorAll("[data-provider]").forEach((button) => {
     button.addEventListener("click", () => activateProvider(button.dataset.provider));
   });
+}
+
+function applyProviderPreset(providerType) {
+  const preset = PROVIDER_PRESETS[providerType];
+  if (!preset) return;
+  els.providerName.value = preset.name;
+  els.providerEndpoint.value = preset.endpoint;
+  els.providerModel.value = preset.model;
+  els.providerSecretRef.value = preset.secretRef;
 }
 
 function renderAgentChat() {

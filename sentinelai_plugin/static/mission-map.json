@@ -1,0 +1,89 @@
+{
+  "nodes": [
+    {
+      "id": "overview",
+      "tab": "overview",
+      "labelEn": "REMAINS",
+      "labelZh": "留存",
+      "prefixEn": "Unlocked",
+      "prefixZh": "已解锁",
+      "metric": "agents",
+      "total": 4,
+      "x": 47,
+      "y": 40,
+      "tone": "white"
+    },
+    {
+      "id": "incidents",
+      "tab": "incidents",
+      "labelEn": "PREPARATIONS",
+      "labelZh": "前序",
+      "prefixEn": "Completed",
+      "prefixZh": "已完成",
+      "metric": "incidents",
+      "total": 5,
+      "x": 65,
+      "y": 48,
+      "tone": "white"
+    },
+    {
+      "id": "visitors",
+      "tab": "visitors",
+      "labelEn": "ELSEWHERE",
+      "labelZh": "别处",
+      "prefixEn": "Completed",
+      "prefixZh": "已完成",
+      "metric": "visitors",
+      "total": 25,
+      "x": 25,
+      "y": 60,
+      "tone": "lime"
+    },
+    {
+      "id": "content",
+      "tab": "content",
+      "labelEn": "MEMORIES",
+      "labelZh": "记忆",
+      "prefixEn": "Completed",
+      "prefixZh": "已完成",
+      "metric": "events",
+      "total": 5,
+      "x": 45,
+      "y": 76,
+      "tone": "lime"
+    },
+    {
+      "id": "providers",
+      "tab": "providers",
+      "labelEn": "INTERFACE",
+      "labelZh": "接口",
+      "prefixEn": "Active",
+      "prefixZh": "已启用",
+      "metric": "providers",
+      "total": 3,
+      "x": 72,
+      "y": 70,
+      "tone": "white"
+    },
+    {
+      "id": "agent",
+      "tab": "agent",
+      "labelEn": "INTELLIGENCE",
+      "labelZh": "智能",
+      "prefixEn": "Linked",
+      "prefixZh": "已连接",
+      "metric": "agentMessages",
+      "total": 8,
+      "x": 55,
+      "y": 43,
+      "tone": "lime"
+    }
+  ],
+  "beams": [
+    { "from": "visitors", "to": "content", "tone": "lime" },
+    { "from": "content", "to": "agent", "tone": "lime" },
+    { "from": "agent", "to": "incidents", "tone": "white" },
+    { "from": "overview", "to": "agent", "tone": "white" },
+    { "from": "agent", "to": "providers", "tone": "white" }
+  ]
+}

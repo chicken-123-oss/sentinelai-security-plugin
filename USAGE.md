@@ -67,7 +67,7 @@ Environment variables:
 1. Open `http://127.0.0.1:8787`.
 2. Pick English or Chinese from the header language toggle.
 3. Complete the advanced CAPTCHA challenge and sign in as the owner.
-4. Review the Monitor page for real-time incident counts, live lists, visitor records, active model, and action mode.
+4. Review the Monitor page as a clue-map console. Circular nodes show unlock/progress counts and can be clicked to jump to Monitor, Incidents, Visitors, Content, Models, or AI Chat.
 5. Open Incidents to inspect rule matches, redacted evidence, structured analysis, and recommended action runs.
 6. Open Content to view the event priority index. Events are grouped by day, ranked by score level, and duplicate identical accesses are collapsed into one row with `duplicateCount`.
 7. Expand event details to inspect attacker-entered content such as request body, query string, command, path, and other redacted payload fields.
@@ -90,6 +90,9 @@ Supported provider profiles:
 - `azure_openai`
 - `openai_compatible`
 - `vllm`
+- `deepseek`
+- `glm`
+- `kimi`
 - `ollama`
 - `anthropic` and `gemini` as stored provider profiles for future connector expansion
 
@@ -115,6 +118,27 @@ http://127.0.0.1:11434
 ```
 
 If a configured model is unreachable or returns invalid JSON, monitoring falls back to the offline analyzer and continues running.
+
+China AI provider presets:
+
+| Provider type | Default endpoint | Default model | Secret reference |
+| --- | --- | --- | --- |
+| `deepseek` | `https://api.deepseek.com` | `deepseek-v4-flash` | `DEEPSEEK_API_KEY` |
+| `glm` | `https://open.bigmodel.cn/api/paas/v4/` | `glm-5` | `ZAI_API_KEY` |
+| `kimi` | `https://api.moonshot.ai/v1` | `kimi-k2.6` | `MOONSHOT_API_KEY` |
+
+These providers use the OpenAI-compatible chat-completions adapter internally. In the Models tab, selecting `deepseek`, `glm`, or `kimi` fills the default endpoint, model, and secret reference. You can still overwrite any field if your account uses a different model or gateway domain.
+
+Example environment variables:
+
+```powershell
+$env:DEEPSEEK_API_KEY="sk-..."
+$env:ZAI_API_KEY="..."
+$env:MOONSHOT_API_KEY="sk-..."
+python -m sentinelai_plugin --demo
+```
+
+SentinelAI sends the model the deterministic scoring framework, including identity, behavior, runtime, and asset-impact layers. The model can explain the score and recommend catalog actions, but it cannot execute actions or bypass approval.
 
 ## 6. Password Change
 
@@ -522,6 +546,15 @@ For hosted OpenAI-compatible APIs:
 3. Activate the provider.
 4. Ingest a known test event.
 5. Check incident analysis for `llmAvailable=true`; if unavailable, inspect `fallbackReason`.
+
+For DeepSeek, Zhipu GLM, or Kimi:
+
+1. Export the provider key as `DEEPSEEK_API_KEY`, `ZAI_API_KEY`, or `MOONSHOT_API_KEY`.
+2. Open Models and choose provider type `deepseek`, `glm`, or `kimi`.
+3. Keep the preset endpoint/model or replace it with your organization's gateway.
+4. Save and activate the provider.
+5. Open AI Chat and ask a status question; check that the response metadata shows `llmAvailable=true`.
+6. Ingest a known test event and check the Incident detail. The `analysis.provider` should match the activated provider and `fallbackUsed` should be `false`.
 
 For local Ollama:
 
