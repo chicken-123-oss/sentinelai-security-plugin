@@ -63,6 +63,7 @@ class HeuristicLLMAdapter:
         agent = context.get("agent") if isinstance(context.get("agent"), dict) else None
         incidents = context.get("incidents") if isinstance(context.get("incidents"), list) else []
         visitors = context.get("visitors") if isinstance(context.get("visitors"), list) else []
+        blocked_ips = context.get("blockedIps") if isinstance(context.get("blockedIps"), list) else []
         latest_incident = incidents[0] if incidents else None
         latest_visitor = visitors[0] if visitors else None
         provider_name = active_provider.get("name") or self.name
@@ -79,6 +80,14 @@ class HeuristicLLMAdapter:
                 f"{agent_part} 当前共有 {counts.get('incidents', 0)} 个事件、{counts.get('events', 0)} 条监控内容、"
                 f"{counts.get('visitors', 0)} 个去重访客。"
             )
+            if any(word in latest for word in ("封禁", "拉黑", "黑名单", "阻断", "block", "blocked")):
+                if blocked_ips:
+                    return _chat_result(
+                        self.name,
+                        f"{base} 当前本地封禁注册表共有 {len(blocked_ips)} 个 IP：{', '.join(blocked_ips[-10:])}。",
+                        llm_available=False,
+                    )
+                return _chat_result(self.name, f"{base} 当前本地封禁注册表没有 IP 记录。", llm_available=False)
             if any(word in latest for word in ("访客", "访问", "visitor")) and latest_visitor:
                 return _chat_result(
                     self.name,
@@ -104,6 +113,14 @@ class HeuristicLLMAdapter:
             f"{counts.get('visitors', 0)} deduplicated visitors."
         )
         lower = latest.lower()
+        if any(word in lower for word in ("block", "blocked", "ban", "banned", "denylist", "blacklist")):
+            if blocked_ips:
+                return _chat_result(
+                    self.name,
+                    f"{base} Local block registry contains {len(blocked_ips)} IP(s): {', '.join(blocked_ips[-10:])}.",
+                    llm_available=False,
+                )
+            return _chat_result(self.name, f"{base} The local block registry has no IP records.", llm_available=False)
         if "visitor" in lower and latest_visitor:
             return _chat_result(
                 self.name,
@@ -355,12 +372,14 @@ def _chat_messages(messages: list[dict[str, str]], context: dict[str, Any]) -> l
         "agent": context.get("agent"),
         "incidents": context.get("incidents"),
         "visitors": context.get("visitors"),
+        "blockedIps": context.get("blockedIps"),
         "scoringFramework": _scoring_framework_context(),
     }
     system = (
         "You are the connected AI assistant inside SentinelAI Security Plugin. "
         "Answer the operator's chat question using the current monitored website security context. "
         "Use the SentinelAI scoring framework when discussing risk: identity, behavior, runtime, and assetImpact. "
+        "When asked about blocked or banned IPs, answer from blockedIps in the current context. "
         "Do not reveal hidden chain-of-thought; provide concise evidence summaries instead. "
         "Do not claim to execute remediation actions, do not expose secrets, and keep answers concise. "
         "If the user writes Chinese, answer in Chinese; otherwise answer in English."

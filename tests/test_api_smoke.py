@@ -79,6 +79,24 @@ class ApiSmokeTests(unittest.TestCase):
                 self.assertEqual(executed["status"], "completed")
                 self.assertTrue((tmp / "evidence" / f"{incident['id']}.json").exists())
 
+                block = next(run for run in incident["actionRuns"] if run["actionId"] == "block_ip")
+                request(base_url, f"/api/v1/incidents/{incident['id']}/approve", token="admin-token", body={})
+                blocked = request(
+                    base_url,
+                    f"/api/v1/action-runs/{block['id']}/execute",
+                    token="admin-token",
+                    body={},
+                )
+                self.assertEqual(blocked["status"], "completed")
+                self.assertTrue((tmp / "blocked_ips.json").exists())
+                block_chat = request(
+                    base_url,
+                    "/api/v1/ai/chat",
+                    token="admin-token",
+                    body={"agentId": "agent_local", "message": "查询已封禁IP记录"},
+                )
+                self.assertIn("203.0.113.9", block_chat["reply"]["message"])
+
                 provider = request(
                     base_url,
                     "/api/v1/providers",

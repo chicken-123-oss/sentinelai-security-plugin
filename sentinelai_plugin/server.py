@@ -425,6 +425,7 @@ class SecurityApp:
         counts = self.storage.counts()
         incidents = self.storage.list_incidents(limit=3)
         visitors = self.storage.list_visitors(limit=3)
+        blocked_ips = self._blocked_ips()
         active_provider = self.storage.get_active_provider() or {}
         prior_messages = self.storage.list_agent_messages(agent_id, limit=12)
         chat_messages = [
@@ -439,6 +440,7 @@ class SecurityApp:
             "agent": agent,
             "incidents": incidents,
             "visitors": visitors,
+            "blockedIps": blocked_ips,
         }
         result = build_adapter(active_provider).chat(chat_messages, context)
         metadata = {
@@ -450,6 +452,16 @@ class SecurityApp:
         if result.get("fallbackReason"):
             metadata["fallbackReason"] = result["fallbackReason"]
         return {"content": str(result.get("content") or ""), "metadata": metadata}
+
+    def _blocked_ips(self) -> list[str]:
+        registry = self.settings.data_dir / "blocked_ips.json"
+        try:
+            data = json.loads(registry.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        if not isinstance(data, list):
+            return []
+        return [str(item) for item in data if item]
 
 
 class SentinelRequestHandler(BaseHTTPRequestHandler):
